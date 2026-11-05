@@ -1,0 +1,16 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Maskable: safe zone is the inner 80% — extend bg to edges -->
+  <rect width="512" height="512" fill="#101114"/>
+  <!-- Top-left bracket (inset more for maskable safe zone) -->
+  <path d="M 130 118 L 118 118 L 118 210" stroke="#F4F0E8" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Top-right bracket -->
+  <path d="M 382 118 L 394 118 L 394 210" stroke="#F4F0E8" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Bottom-left bracket -->
+  <path d="M 118 302 L 118 394 L 210 394" stroke="#F4F0E8" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Bottom-right bracket -->
+  <path d="M 302 394 L 394 394 L 394 302" stroke="#F4F0E8" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Centre glow -->
+  <circle cx="256" cy="256" r="50" fill="#FF765E" opacity="0.15"/>
+  <!-- Centre focal dot -->
+  <circle cx="256" cy="256" r="28" fill="#FF765E"/>
+</svg>

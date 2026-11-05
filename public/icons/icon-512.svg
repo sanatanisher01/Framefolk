@@ -1,0 +1,16 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="512" height="512" rx="100" fill="#101114"/>
+  <!-- Top-left bracket -->
+  <path d="M 102 90 L 90 90 L 90 192" stroke="#F4F0E8" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Top-right bracket -->
+  <path d="M 410 90 L 422 90 L 422 192" stroke="#F4F0E8" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Bottom-left bracket -->
+  <path d="M 90 320 L 90 422 L 192 422" stroke="#F4F0E8" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Bottom-right bracket -->
+  <path d="M 320 422 L 422 422 L 422 320" stroke="#F4F0E8" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Centre glow -->
+  <circle cx="256" cy="256" r="58" fill="#FF765E" opacity="0.15"/>
+  <!-- Centre focal dot -->
+  <circle cx="256" cy="256" r="32" fill="#FF765E"/>
+</svg>

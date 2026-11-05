@@ -2,26 +2,175 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    /* FRAMEFOLK Design Tokens */
+    --background: #101114;
+    --foreground: #F4F0E8;
+    --card: #202126;
+    --card-foreground: #F4F0E8;
+    --popover: #202126;
+    --popover-foreground: #F4F0E8;
+    --primary: #FF765E;
+    --primary-foreground: #101114;
+    --secondary: #17181D;
+    --secondary-foreground: #F4F0E8;
+    --muted: #17181D;
+    --muted-foreground: #A5A3AA;
+    --accent: #FF765E;
+    --accent-foreground: #101114;
+    --destructive: #EF4444;
+    --destructive-foreground: #F4F0E8;
+    --border: #303137;
+    --input: #303137;
+    --ring: #FF765E;
+    --radius: 0.75rem;
+  }
+
+  /* Light mode override (optional, applied via .light class) */
+  .light {
+    --background: #F8F7F4;
+    --foreground: #101114;
+    --card: #FFFFFF;
+    --card-foreground: #101114;
+    --popover: #FFFFFF;
+    --popover-foreground: #101114;
+    --primary: #FF765E;
+    --primary-foreground: #FFFFFF;
+    --secondary: #F1F0ED;
+    --secondary-foreground: #101114;
+    --muted: #F1F0ED;
+    --muted-foreground: #6B6970;
+    --border: #E5E4E2;
+    --input: #E5E4E2;
+  }
+
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+  }
+
+  html {
+    @apply scroll-smooth;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    min-height: 100dvh;
+  }
+
+  /* Safe area support for PWA */
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #303137;
+    border-radius: 2px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #A5A3AA;
+  }
+
+  /* Typography base */
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display font-semibold tracking-tight;
+  }
+
+  /* Focus visible ring */
+  :focus-visible {
+    outline: 2px solid #FF765E;
+    outline-offset: 2px;
   }
 }
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+@layer components {
+  /* Skeleton shimmer animation */
+  .skeleton {
+    @apply bg-bg-secondary animate-skeleton rounded-lg;
+  }
+
+  /* Card base */
+  .card-base {
+    @apply bg-bg-card border border-border rounded-2xl;
+  }
+
+  /* Glass morphism overlay */
+  .glass {
+    @apply bg-bg-card/80 backdrop-blur-md border border-border/50;
+  }
+
+  /* Masonry grid */
+  .masonry-grid {
+    column-count: 2;
+    column-gap: 8px;
+  }
+
+  @media (min-width: 640px) {
+    .masonry-grid {
+      column-count: 3;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .masonry-grid {
+      column-count: 4;
+    }
+  }
+
+  .masonry-item {
+    break-inside: avoid;
+    margin-bottom: 8px;
+  }
+
+  /* Line clamp utilities */
+  .line-clamp-2 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .line-clamp-3 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+  }
 }
 
 @layer utilities {
+  /* Hide scrollbar but keep scroll functionality */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* Text balance */
   .text-balance {
     text-wrap: balance;
+  }
+
+  /* Safe bottom padding for mobile nav */
+  .pb-safe {
+    padding-bottom: calc(env(safe-area-inset-bottom) + 4rem);
   }
 }
