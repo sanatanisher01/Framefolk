@@ -15,7 +15,7 @@
  *   - Safe for shared devices: only public static assets are cached
  */
 
-const CACHE_VERSION = "v1-BUILD_TIME";
+const CACHE_VERSION = "v1-202611060057";
 const STATIC_CACHE  = `framefolk-static-${CACHE_VERSION}`;
 const IMAGE_CACHE   = `framefolk-images-${CACHE_VERSION}`;
 const PAGE_CACHE    = `framefolk-pages-${CACHE_VERSION}`;
