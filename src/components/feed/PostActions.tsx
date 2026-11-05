@@ -152,11 +152,13 @@ export function PostActions({
       <button
         type="button"
         onClick={onCommentClick}
-        aria-label="Comments"
-        className="flex items-center gap-1.5 p-1.5 rounded-lg hover:bg-bg-secondary transition-colors group"
+        aria-label="Toggle comments"
+        className="flex items-center gap-1.5 p-1.5 rounded-lg hover:bg-accent/10 transition-colors group"
       >
-        <MessageCircle className="h-5 w-5 text-text-secondary group-hover:text-text-primary transition-colors" />
-        <span className="text-sm tabular-nums text-text-secondary">{formatCount(commentsCount)}</span>
+        <MessageCircle className="h-5 w-5 text-text-secondary group-hover:text-accent transition-colors" />
+        <span className="text-sm tabular-nums text-text-secondary group-hover:text-accent transition-colors">
+          {formatCount(commentsCount)}
+        </span>
       </button>
 
       {/* Share stub */}

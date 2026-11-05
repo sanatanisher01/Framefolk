@@ -102,7 +102,17 @@ export function PostCard({ post, mediaItems = [], currentUid, currentUsername = 
         </div>
       )}
 
-      {/* Comments */}
+      {/* View comments toggle */}
+      {post.commentsCount > 0 && !showComments && (
+        <button
+          onClick={() => setShowComments(true)}
+          className="w-full text-left px-4 pb-3 text-xs text-text-muted hover:text-accent transition-colors"
+        >
+          View all {post.commentsCount} comment{post.commentsCount !== 1 ? "s" : ""}
+        </button>
+      )}
+
+      {/* Comments section */}
       {showComments && (
         <div className="px-4 pb-4 border-t border-border/50 pt-3">
           <CommentSection

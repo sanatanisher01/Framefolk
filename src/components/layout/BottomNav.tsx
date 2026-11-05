@@ -45,9 +45,10 @@ export function BottomNav({ username = "me", unreadMessages = 0 }: BottomNavProp
       className={cn(
         "fixed bottom-0 left-0 right-0 z-40 lg:hidden",
         "bg-bg-secondary/95 backdrop-blur-md border-t border-border",
-        "pb-safe"
+        "safe-bottom"
       )}
       aria-label="Mobile navigation"
+      style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
     >
       <div className="flex items-center justify-around h-16 px-2">
         {items.map((item) => {

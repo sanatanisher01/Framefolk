@@ -6,6 +6,7 @@ import Link from "next/link";
 import {
   Settings, UserPlus, UserMinus, MessageCircle,
   MoreHorizontal, Lock, Clock, Copy, Flag, ShieldBan, CheckCircle,
+  Bell, BookImage, Share2,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { Avatar } from "@/components/ui/Avatar";
@@ -18,6 +19,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
   DialogDescription, DialogFooter,
 } from "@/components/ui/Dialog";
+import { useToast } from "@/hooks/useToast";
 import {
   followUser, unfollowUser, isFollowing, hasPendingFollowRequest,
   blockUser, reportUser,
@@ -35,6 +37,7 @@ interface Props {
 type FollowState = "idle" | "following" | "requested" | "loading";
 
 export function ProfileHeader({ user, isOwnProfile, currentUid, isApproved }: Props) {
+  const { toast } = useToast();
   const [followState, setFollowState] = useState<FollowState>("idle");
   const [optimisticFollowers, setOptimisticFollowers] = useState(user.followersCount);
   const [showBlockDialog, setShowBlockDialog] = useState(false);
@@ -78,12 +81,15 @@ export function ProfileHeader({ user, isOwnProfile, currentUid, isApproved }: Pr
       await followUser(currentUid, user.uid);
       if (user.isPrivate) {
         setFollowState("requested");
+        toast({ title: "Follow request sent", description: `@${user.username} will be notified.`, variant: "default" });
       } else {
         setFollowState("following");
         setOptimisticFollowers((c) => c + 1);
+        toast({ title: `Following @${user.username}`, variant: "success" });
       }
     } catch {
       setFollowState("idle");
+      toast({ title: "Could not follow", description: "Please try again.", variant: "error" });
     }
   }
 
@@ -103,8 +109,18 @@ export function ProfileHeader({ user, isOwnProfile, currentUid, isApproved }: Pr
     const url = `${window.location.origin}/@${user.username}`;
     navigator.clipboard.writeText(url).then(() => {
       setCopyDone(true);
+      toast({ title: "Profile link copied!", variant: "default" });
       setTimeout(() => setCopyDone(false), 2000);
     }).catch(() => {});
+  }
+
+  function handleShare() {
+    const url = `${window.location.origin}/@${user.username}`;
+    if (navigator.share) {
+      navigator.share({ title: `@${user.username} on FRAMEFOLK`, url }).catch(() => {});
+    } else {
+      handleCopyLink();
+    }
   }
 
   async function handleBlock() {
@@ -157,14 +173,15 @@ export function ProfileHeader({ user, isOwnProfile, currentUid, isApproved }: Pr
         )}
       </div>
 
-      {/* Profile info row */}
+      {/* Profile info */}
       <div className="px-4 pb-4">
-        {/* Avatar + action buttons */}
-        <div className="flex items-end justify-between -mt-10 mb-3">
+        {/* Avatar row — avatar overlaps cover, buttons sit BELOW on same row */}
+        <div className="flex items-end justify-between -mt-12 mb-3">
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ duration: 0.3 }}
+            className="shrink-0"
           >
             <Avatar
               src={user.profilePhotoUrl}
@@ -174,19 +191,30 @@ export function ProfileHeader({ user, isOwnProfile, currentUid, isApproved }: Pr
             />
           </motion.div>
 
-          {/* Action buttons */}
-          <div className="flex items-center gap-2 pb-1">
+          {/* Action buttons — pushed down with pt so they don't overlap cover */}
+          <div className="flex items-center gap-2 pt-14">
             {isOwnProfile ? (
-              <Link href="/settings/profile">
-                <Button variant="secondary" size="sm" className="gap-1.5">
-                  <Settings className="h-4 w-4" />
-                  Edit profile
+              <>
+                <Link href="/settings/profile">
+                  <Button variant="secondary" size="sm" className="gap-1.5">
+                    <Settings className="h-4 w-4" />
+                    <span className="hidden sm:inline">Edit profile</span>
+                    <span className="sm:hidden">Edit</span>
+                  </Button>
+                </Link>
+                <Link href="/settings">
+                  <Button variant="secondary" size="icon-sm" aria-label="Settings">
+                    <Settings className="h-4 w-4" />
+                  </Button>
+                </Link>
+                <Button variant="secondary" size="icon-sm" aria-label="Share profile" onClick={handleShare}>
+                  <Share2 className="h-4 w-4" />
                 </Button>
-              </Link>
+              </>
             ) : (
               <>
                 {isApproved && (
-                  <Link href="/messages">
+                  <Link href={`/messages?with=${user.uid}`}>
                     <Button variant="secondary" size="icon-sm" aria-label="Send message">
                       <MessageCircle className="h-4 w-4" />
                     </Button>
@@ -199,23 +227,31 @@ export function ProfileHeader({ user, isOwnProfile, currentUid, isApproved }: Pr
                     size="sm"
                     onClick={handleUnfollow}
                     loading={followState === ("loading" as string)}
-                    className="gap-1.5"
+                    className="gap-1.5 min-w-[90px]"
                   >
                     <UserMinus className="h-4 w-4" />
-                    {followButtonLabel}
+                    Following
+                  </Button>
+                ) : followState === "requested" ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled
+                    className="gap-1.5 min-w-[90px] opacity-70"
+                  >
+                    <Clock className="h-4 w-4" />
+                    Requested
                   </Button>
                 ) : (
                   <Button
-                    variant={followState === "requested" ? "secondary" : "primary"}
+                    variant="primary"
                     size="sm"
-                    onClick={followState === "idle" ? handleFollow : undefined}
-                    loading={followState === ("loading" as string)}
-                    disabled={followState === "requested"}
-                    className="gap-1.5"
+                    onClick={handleFollow}
+                    loading={followState === "loading"}
+                    className="gap-1.5 min-w-[90px]"
                   >
-                    {followState === "idle" && <UserPlus className="h-4 w-4" />}
-                    {followState === "requested" && <Clock className="h-4 w-4" />}
-                    {followButtonLabel}
+                    <UserPlus className="h-4 w-4" />
+                    Follow
                   </Button>
                 )}
 
@@ -231,6 +267,10 @@ export function ProfileHeader({ user, isOwnProfile, currentUid, isApproved }: Pr
                         ? <><CheckCircle className="h-4 w-4 mr-2 text-green-400" />Copied!</>
                         : <><Copy className="h-4 w-4 mr-2" />Copy profile link</>
                       }
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleShare}>
+                      <Share2 className="h-4 w-4 mr-2" />
+                      Share profile
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem destructive onClick={() => setShowReportDialog(true)}>
@@ -279,7 +319,7 @@ export function ProfileHeader({ user, isOwnProfile, currentUid, isApproved }: Pr
         </div>
 
         {/* Stats */}
-        <div className="flex items-center gap-5">
+        <div className="flex items-center gap-5 mb-3">
           <StatItem count={user.postsCount} label="Posts" />
           <button className="hover:opacity-80 transition-opacity">
             <StatItem count={optimisticFollowers} label="Followers" />
@@ -288,6 +328,30 @@ export function ProfileHeader({ user, isOwnProfile, currentUid, isApproved }: Pr
             <StatItem count={user.followingCount} label="Following" />
           </button>
         </div>
+
+        {/* Own profile quick links */}
+        {isOwnProfile && (
+          <div className="flex flex-wrap gap-2 mb-2">
+            <Link href="/settings">
+              <Button variant="secondary" size="sm" className="gap-1.5 text-xs">
+                <Settings className="h-3.5 w-3.5" />
+                Settings
+              </Button>
+            </Link>
+            <Link href="/settings/follow-requests">
+              <Button variant="secondary" size="sm" className="gap-1.5 text-xs">
+                <Bell className="h-3.5 w-3.5" />
+                Follow requests
+              </Button>
+            </Link>
+            <Link href="/albums">
+              <Button variant="secondary" size="sm" className="gap-1.5 text-xs">
+                <BookImage className="h-3.5 w-3.5" />
+                Albums
+              </Button>
+            </Link>
+          </div>
+        )}
 
         {/* Private account notice */}
         {showPrivateLock && (
