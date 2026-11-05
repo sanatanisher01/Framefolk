@@ -1,8 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Suspense } from "react";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { loadStoriesGrouped, type StoryAuthorGroup } from "@/services/story.service";
 import { StoryViewer } from "@/components/stories/StoryViewer";
@@ -12,21 +11,29 @@ function StoriesContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user } = useAuth();
+
   const [groups, setGroups] = useState<StoryAuthorGroup[]>([]);
   const [loading, setLoading] = useState(true);
+  const [initialGroupIndex, setInitialGroupIndex] = useState(0);
 
   const targetUid = searchParams.get("uid");
-  const initialIdx = targetUid
-    ? groups.findIndex((g) => g.authorUid === targetUid)
-    : 0;
 
   useEffect(() => {
     if (!user) return;
     loadStoriesGrouped(user.uid)
-      .then(setGroups)
+      .then((result) => {
+        setGroups(result);
+        // Compute initial index AFTER groups are loaded — fixes the race condition
+        if (targetUid) {
+          const idx = result.findIndex((g) => g.authorUid === targetUid);
+          setInitialGroupIndex(idx >= 0 ? idx : 0);
+        } else {
+          setInitialGroupIndex(0);
+        }
+      })
       .catch(() => setGroups([]))
       .finally(() => setLoading(false));
-  }, [user]);
+  }, [user, targetUid]);
 
   if (loading) return <FullPageSpinner />;
 
@@ -38,7 +45,7 @@ function StoriesContent() {
   return (
     <StoryViewer
       groups={groups}
-      initialGroupIndex={Math.max(0, initialIdx)}
+      initialGroupIndex={initialGroupIndex}
       currentUid={user?.uid}
       onClose={() => router.replace("/home")}
     />

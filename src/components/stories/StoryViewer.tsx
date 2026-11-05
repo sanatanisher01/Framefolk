@@ -116,10 +116,17 @@ export function StoryViewer({ groups, initialGroupIndex = 0, currentUid, onClose
   if (!currentGroup || !currentStory) return null;
 
   const isOwnStory = currentStory.authorUid === currentUid;
-  // cloudinaryPublicId is stored directly on the story document for quick delivery
-  const rawPublicId = (currentStory as Story & { cloudinaryPublicId?: string }).cloudinaryPublicId;
-  const mediaUrl = rawPublicId
-    ? buildImageUrl(rawPublicId, CLOUD_NAME, { width: 800 })
+  const publicId = currentStory.cloudinaryPublicId ?? null;
+  const isVideoStory = currentStory.type === "video";
+
+  const mediaUrl = publicId
+    ? isVideoStory
+      ? `https://res.cloudinary.com/${CLOUD_NAME}/video/upload/q_auto,f_auto/${publicId}`
+      : buildImageUrl(publicId, CLOUD_NAME, { width: 800 })
+    : null;
+
+  const posterUrl = publicId && isVideoStory
+    ? `https://res.cloudinary.com/${CLOUD_NAME}/video/upload/so_auto,w_800,f_jpg,q_auto/${publicId}`
     : null;
 
   return (
@@ -210,6 +217,18 @@ export function StoryViewer({ groups, initialGroupIndex = 0, currentUid, onClose
                     {currentStory.textContent}
                   </p>
                 </div>
+              ) : isVideoStory && mediaUrl ? (
+                <video
+                  key={mediaUrl}
+                  src={mediaUrl}
+                  poster={posterUrl ?? undefined}
+                  autoPlay
+                  playsInline
+                  muted
+                  loop
+                  className="w-full h-full object-cover"
+                  onPlay={() => setPaused(false)}
+                />
               ) : mediaUrl ? (
                 <Image
                   src={mediaUrl}

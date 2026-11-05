@@ -19,8 +19,10 @@ export interface AvatarProps {
   className?: string;
   /** Show online indicator */
   online?: boolean;
-  /** Show story ring (accent coloured border) */
+  /** Show story ring (accent coloured border) — true means has story */
   hasStory?: boolean;
+  /** When hasStory=true, whether the story is unviewed (bright ring) or viewed (dim ring) */
+  hasUnviewedStory?: boolean;
 }
 
 export function Avatar({
@@ -31,6 +33,7 @@ export function Avatar({
   className,
   online,
   hasStory,
+  hasUnviewedStory = true,
 }: AvatarProps) {
   const initials = fallback
     ? fallback
@@ -45,11 +48,12 @@ export function Avatar({
     <div className="relative inline-flex shrink-0">
       <AvatarPrimitive.Root
         className={cn(
-          "relative flex shrink-0 overflow-hidden rounded-full",
-          hasStory && "ring-2 ring-accent ring-offset-2 ring-offset-bg-primary",
-          sizeMap[size],
-          className
-        )}
+            "relative flex shrink-0 overflow-hidden rounded-full",
+            hasStory && hasUnviewedStory && "ring-2 ring-accent ring-offset-2 ring-offset-bg-primary",
+            hasStory && !hasUnviewedStory && "ring-2 ring-border ring-offset-2 ring-offset-bg-primary",
+            sizeMap[size],
+            className
+          )}
       >
         <AvatarPrimitive.Image
           src={src ?? undefined}

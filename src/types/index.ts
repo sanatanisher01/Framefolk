@@ -215,6 +215,8 @@ export interface Media {
   isPrivate: boolean;
   thumbnailPublicId: string | null;
   altText: string;
+  /** Cloudinary delivery URL (pre-built for fast rendering) */
+  deliveryUrl: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -230,6 +232,8 @@ export interface Story {
   authorPhotoUrl: string;
   type: StoryType;
   mediaId: string | null;
+  /** Denormalized Cloudinary public ID stored directly on the story doc for fast delivery */
+  cloudinaryPublicId: string | null;
   textContent: string | null;
   textStyle: StoryTextStyle | null;
   caption: string | null;

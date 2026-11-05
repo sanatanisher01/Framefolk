@@ -5,18 +5,8 @@ import Link from "next/link";
 import { PlusCircle } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Skeleton } from "@/components/ui/Skeleton";
-import {
-  collection, query, where, orderBy, limit, getDocs,
-} from "firebase/firestore";
-import { db } from "@/lib/firebase/client";
-
-interface StoryAuthor {
-  uid: string;
-  username: string;
-  displayName: string;
-  photoUrl: string;
-  hasStory: boolean;
-}
+import { loadStoriesGrouped } from "@/services/story.service";
+import { useAuth } from "@/lib/auth/AuthContext";
 
 interface Props {
   currentUid?: string;
@@ -25,75 +15,73 @@ interface Props {
 }
 
 export function StoriesCarousel({ currentUid, currentUsername, currentPhotoUrl }: Props) {
-  const [authors, setAuthors] = useState<StoryAuthor[]>([]);
+  const { user } = useAuth();
+  const [groups, setGroups] = useState<Array<{
+    authorUid: string;
+    authorUsername: string;
+    authorPhotoUrl: string;
+    hasUnviewed: boolean;
+    hasStory: boolean;
+  }>>([]);
   const [loading, setLoading] = useState(true);
+  const [hasOwnStory, setHasOwnStory] = useState(false);
 
   useEffect(() => {
-    if (!db || !currentUid) { setLoading(false); return; }
+    const uid = currentUid ?? user?.uid;
+    if (!uid) { setLoading(false); return; }
     let cancelled = false;
 
-    async function load() {
-      if (!db) return;
-      try {
-        const now = new Date();
-        const q = query(
-          collection(db, "stories"),
-          where("visibility", "in", ["public", "followers"]),
-          where("isExpired", "==", false),
-          where("expiresAt", ">", now),
-          orderBy("expiresAt"),
-          limit(20)
+    loadStoriesGrouped(uid)
+      .then((result) => {
+        if (cancelled) return;
+
+        // Separate own story from others
+        const ownGroup = result.find((g) => g.authorUid === uid);
+        const othersGroups = result.filter((g) => g.authorUid !== uid);
+
+        setHasOwnStory(!!ownGroup);
+        setGroups(
+          othersGroups.map((g) => ({
+            authorUid: g.authorUid,
+            authorUsername: g.authorUsername,
+            authorPhotoUrl: g.authorPhotoUrl,
+            hasUnviewed: g.hasUnviewed,
+            hasStory: g.stories.length > 0,
+          }))
         );
-        const snap = await getDocs(q);
+      })
+      .catch(() => { if (!cancelled) setGroups([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
 
-        // Deduplicate by authorUid
-        const seen = new Set<string>();
-        const result: StoryAuthor[] = [];
-        snap.docs.forEach((d) => {
-          const data = d.data();
-          const uid = data.authorUid as string;
-          if (!seen.has(uid) && uid !== currentUid) {
-            seen.add(uid);
-            result.push({
-              uid,
-              username: (data.authorUsername as string) ?? "",
-              displayName: (data.authorUsername as string) ?? "",
-              photoUrl: (data.authorPhotoUrl as string) ?? "",
-              hasStory: true,
-            });
-          }
-        });
-
-        if (!cancelled) setAuthors(result);
-      } catch {
-        if (!cancelled) setAuthors([]);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    load();
     return () => { cancelled = true; };
-  }, [currentUid]);
+  }, [currentUid, user?.uid]);
+
+  const myUid = currentUid ?? user?.uid;
 
   return (
     <div className="flex gap-3 overflow-x-auto no-scrollbar py-1 px-1">
-      {/* Add story */}
-      {currentUid && (
-        <Link href="/stories/create" className="flex flex-col items-center gap-1.5 shrink-0 group">
+      {/* Own story bubble — view if exists, create if not */}
+      {myUid && (
+        <Link
+          href={hasOwnStory ? `/stories?uid=${myUid}` : "/stories/create"}
+          className="flex flex-col items-center gap-1.5 shrink-0 group"
+        >
           <div className="relative h-14 w-14">
             <Avatar
-              src={currentPhotoUrl}
-              fallback={currentUsername ?? ""}
+              src={currentPhotoUrl ?? user?.profilePhotoUrl}
+              fallback={currentUsername ?? user?.username ?? ""}
               size="lg"
-              className="ring-2 ring-border group-hover:ring-accent transition-colors"
+              hasStory={hasOwnStory}
+              className="group-hover:scale-105 transition-transform"
             />
-            <div className="absolute bottom-0 right-0 h-5 w-5 rounded-full bg-accent border-2 border-bg-primary flex items-center justify-center">
-              <PlusCircle className="h-3.5 w-3.5 text-bg-primary" />
-            </div>
+            {!hasOwnStory && (
+              <div className="absolute bottom-0 right-0 h-5 w-5 rounded-full bg-accent border-2 border-bg-primary flex items-center justify-center">
+                <PlusCircle className="h-3.5 w-3.5 text-bg-primary" />
+              </div>
+            )}
           </div>
           <span className="text-[10px] text-text-secondary w-14 text-center truncate">
-            Your story
+            {hasOwnStory ? "Your story" : "Add story"}
           </span>
         </Link>
       )}
@@ -107,29 +95,30 @@ export function StoriesCarousel({ currentUid, currentUsername, currentPhotoUrl }
           </div>
         ))}
 
-      {/* Story authors */}
+      {/* Other users' stories */}
       {!loading &&
-        authors.map((author) => (
+        groups.map((g) => (
           <Link
-            key={author.uid}
-            href={`/stories?uid=${author.uid}`}
+            key={g.authorUid}
+            href={`/stories?uid=${g.authorUid}`}
             className="flex flex-col items-center gap-1.5 shrink-0 group"
           >
             <Avatar
-              src={author.photoUrl}
-              fallback={author.username}
+              src={g.authorPhotoUrl}
+              fallback={g.authorUsername}
               size="lg"
-              hasStory={author.hasStory}
+              hasStory={g.hasStory}
+              hasUnviewedStory={g.hasUnviewed}
               className="group-hover:scale-105 transition-transform"
             />
             <span className="text-[10px] text-text-secondary w-14 text-center truncate">
-              {author.username}
+              {g.authorUsername}
             </span>
           </Link>
         ))}
 
-      {/* Empty state if no stories */}
-      {!loading && authors.length === 0 && (
+      {/* Empty state */}
+      {!loading && groups.length === 0 && !myUid && (
         <p className="text-xs text-text-muted self-center pl-2">
           No stories yet — follow people to see theirs.
         </p>

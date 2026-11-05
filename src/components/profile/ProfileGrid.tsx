@@ -56,6 +56,7 @@ export function ProfileGrid({ uid, type, isPrivate, isOwnProfile }: Props) {
     if (!after) setLoading(true); else setLoadingMore(true);
     try {
       const postType = type === "photo" ? ["photo", "multi"] : ["video"];
+      // Query with type filter — requires composite index on (authorUid, type, createdAt)
       let q = query(
         collection(db, "posts"),
         where("authorUid", "==", uid),
