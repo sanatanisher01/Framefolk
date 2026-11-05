@@ -4,16 +4,24 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   Users, UserCheck, UserX, Ban, Image as ImageIcon, Flag,
-  Trash2, HardDrive, Clock, ChevronRight,
+  Trash2, HardDrive, Clock, ChevronRight, RefreshCw, CheckCircle,
 } from "lucide-react";
 import { loadAdminStats, type AdminStats } from "@/services/admin.service";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { StatCard } from "@/components/admin/StatCard";
+import { Button } from "@/components/ui/Button";
 import { formatRelativeTime } from "@/utils/format";
 import {
   subscribeToPendingRegistrations, subscribeToReports, subscribeToDeletionRequests,
   type PendingRegistration, type AdminReportRow, type AdminDeletionRequest,
 } from "@/services/admin.service";
+
+async function clearAllCaches(): Promise<number> {
+  if (typeof window === "undefined" || !("caches" in window)) return 0;
+  const keys = await window.caches.keys();
+  await Promise.all(keys.map((k) => window.caches.delete(k)));
+  return keys.length;
+}
 
 export default function AdminOverview() {
   const [stats, setStats] = useState<AdminStats | null>(null);
@@ -21,6 +29,8 @@ export default function AdminOverview() {
   const [pending, setPending] = useState<PendingRegistration[]>([]);
   const [reports, setReports] = useState<AdminReportRow[]>([]);
   const [delReqs, setDelReqs] = useState<AdminDeletionRequest[]>([]);
+  const [cacheClearing, setCacheClearing] = useState(false);
+  const [cacheCleared, setCacheCleared] = useState(false);
 
   useEffect(() => {
     loadAdminStats().then(setStats).catch(() => {}).finally(() => setStatsLoading(false));
@@ -30,9 +40,44 @@ export default function AdminOverview() {
     return () => { u1(); u2(); u3(); };
   }, []);
 
+  async function handleClearCache() {
+    setCacheClearing(true);
+    try {
+      const count = await clearAllCaches();
+      // Also tell SW to skip waiting and reload all clients
+      if ("serviceWorker" in navigator) {
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (reg?.waiting) {
+          reg.waiting.postMessage({ type: "SKIP_WAITING" });
+        }
+      }
+      setCacheCleared(true);
+      setTimeout(() => setCacheCleared(false), 3000);
+      console.log(`[Admin] Cleared ${count} cache(s)`);
+    } catch (err) {
+      console.error("[Admin] Cache clear failed:", err);
+    } finally {
+      setCacheClearing(false);
+    }
+  }
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      <AdminPageHeader title="Overview" description="Platform health and moderation queue at a glance" />
+      <div className="flex items-start justify-between gap-4 mb-6">
+        <AdminPageHeader title="Overview" description="Platform health and moderation queue at a glance" />
+        <Button
+          variant={cacheCleared ? "secondary" : "primary"}
+          size="sm"
+          className="gap-2 shrink-0"
+          loading={cacheClearing}
+          onClick={handleClearCache}
+        >
+          {cacheCleared
+            ? <><CheckCircle className="h-4 w-4" /> Cache cleared</>
+            : <><RefreshCw className="h-4 w-4" /> Clear all caches</>
+          }
+        </Button>
+      </div>
 
       {/* Stats grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-8">

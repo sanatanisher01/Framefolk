@@ -217,19 +217,22 @@ export function subscribeToComments(
   pageSize = 20
 ): Unsubscribe {
   if (!db) return () => {};
+  // Only orderBy createdAt — no compound filter to avoid missing composite index.
+  // Filter isDeleted client-side.
   const q = query(
     collection(db, "posts", postId, "comments"),
-    where("isDeleted", "==", false),
     orderBy("createdAt", "asc"),
     limit(pageSize)
   );
   return onSnapshot(q, (snap) => {
-    const comments = snap.docs.map((d) => ({
-      id: d.id,
-      ...d.data(),
-      createdAt: d.data().createdAt?.toDate() ?? new Date(),
-      updatedAt: d.data().updatedAt?.toDate() ?? new Date(),
-    } as Comment));
+    const comments = snap.docs
+      .map((d) => ({
+        id: d.id,
+        ...d.data(),
+        createdAt: d.data().createdAt?.toDate() ?? new Date(),
+        updatedAt: d.data().updatedAt?.toDate() ?? new Date(),
+      } as Comment))
+      .filter((c) => !c.isDeleted); // filter deleted client-side
     callback(comments);
   });
 }

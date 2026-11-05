@@ -55,10 +55,10 @@ export function subscribeToConversations(
   callback: (convs: Conversation[]) => void
 ): Unsubscribe {
   if (!db) return () => {};
+  // Query without orderBy to avoid needing a composite index on null lastMessageAt
   const q = query(
     collection(db, "conversations"),
     where("participants", "array-contains", uid),
-    orderBy("lastMessageAt", "desc"),
     limit(30)
   );
   return onSnapshot(q, (snap) => {
@@ -72,6 +72,13 @@ export function subscribeToConversations(
         unreadCounts: data.unreadCounts ?? {},
         createdAt: data.createdAt?.toDate() ?? new Date(),
       } as Conversation;
+    });
+    // Sort client-side: conversations with messages first, then by lastMessageAt desc
+    convs.sort((a, b) => {
+      if (!a.lastMessageAt && !b.lastMessageAt) return 0;
+      if (!a.lastMessageAt) return 1;
+      if (!b.lastMessageAt) return -1;
+      return b.lastMessageAt.getTime() - a.lastMessageAt.getTime();
     });
     callback(convs);
   });
@@ -87,29 +94,31 @@ export function subscribeToMessages(
   pageSize = 50
 ): Unsubscribe {
   if (!db) return () => {};
+  // Simple orderBy only — filter isDeleted client-side to avoid composite index requirement
   const q = query(
     collection(db, "conversations", conversationId, "messages"),
-    where("isDeleted", "==", false),
     orderBy("createdAt", "asc"),
     limit(pageSize)
   );
   return onSnapshot(q, (snap) => {
-    const messages = snap.docs.map((d) => {
-      const data = d.data();
-      return {
-        id: d.id,
-        senderUid: data.senderUid as string,
-        type: (data.type as Message["type"]) ?? "text",
-        text: (data.text as string) ?? null,
-        mediaId: (data.mediaId as string) ?? null,
-        isRead: (data.isRead as boolean) ?? false,
-        readAt: data.readAt?.toDate() ?? null,
-        isDeleted: (data.isDeleted as boolean) ?? false,
-        deletedAt: data.deletedAt?.toDate() ?? null,
-        createdAt: data.createdAt?.toDate() ?? new Date(),
-        updatedAt: data.updatedAt?.toDate() ?? new Date(),
-      } as Message;
-    });
+    const messages = snap.docs
+      .map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          senderUid: data.senderUid as string,
+          type: (data.type as Message["type"]) ?? "text",
+          text: (data.text as string) ?? null,
+          mediaId: (data.mediaId as string) ?? null,
+          isRead: (data.isRead as boolean) ?? false,
+          readAt: data.readAt?.toDate() ?? null,
+          isDeleted: (data.isDeleted as boolean) ?? false,
+          deletedAt: data.deletedAt?.toDate() ?? null,
+          createdAt: data.createdAt?.toDate() ?? new Date(),
+          updatedAt: data.updatedAt?.toDate() ?? new Date(),
+        } as Message;
+      })
+      .filter((m) => !m.isDeleted); // filter client-side
     callback(messages);
   });
 }

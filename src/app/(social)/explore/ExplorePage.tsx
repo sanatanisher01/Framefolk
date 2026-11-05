@@ -16,10 +16,11 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
 import { Input } from "@/components/ui/Input";
+import { Avatar } from "@/components/ui/Avatar";
 import { buildImageUrl, buildVideoThumbnail } from "@/lib/cloudinary/config";
-import { Search, Grid3x3, Play, Images } from "lucide-react";
+import { Search, Grid3x3, Play, Images, Users } from "lucide-react";
 import { useDebounce } from "@/hooks/useDebounce";
-import type { Post, Media } from "@/types";
+import type { Post, Media, User } from "@/types";
 
 const PAGE_SIZE = 24;
 const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME ?? "";
@@ -39,6 +40,7 @@ export function ExplorePage() {
   const [search, setSearch] = useState(searchParams.get("tag") ? `#${searchParams.get("tag")}` : "");
   const debouncedSearch = useDebounce(search, 400);
   const [items, setItems] = useState<PostWithThumb[]>([]);
+  const [userResults, setUserResults] = useState<Partial<User>[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [cursor, setCursor] = useState<QueryDocumentSnapshot | null>(null);
@@ -76,6 +78,27 @@ export function ExplorePage() {
       const username = debouncedSearch.startsWith("@")
         ? debouncedSearch.slice(1).toLowerCase().trim()
         : null;
+      const keyword = !tag && !username && debouncedSearch.trim()
+        ? debouncedSearch.trim().toLowerCase()
+        : null;
+
+      // ── User search when @username is typed ──────────────────────────────
+      if (username && !afterCursor) {
+        setUserResults([]);
+        try {
+          // Search users by username prefix
+          const uq = query(
+            collection(db, "users"),
+            where("username", ">=", username),
+            where("username", "<=", username + "\uf8ff"),
+            limit(5)
+          );
+          const usnap = await getDocs(uq);
+          setUserResults(usnap.docs.map((d) => ({ uid: d.id, ...d.data() } as Partial<User>)));
+        } catch { /* ignore */ }
+      } else if (!afterCursor) {
+        setUserResults([]);
+      }
 
       let q = query(
         collection(db, "posts"),
@@ -99,6 +122,19 @@ export function ExplorePage() {
           collection(db, "posts"),
           where("authorUsername", "==", username),
           where("visibility", "==", "public"),
+          orderBy("createdAt", "desc"),
+          limit(PAGE_SIZE + 1)
+        );
+      }
+
+      if (keyword) {
+        // Keyword search — filter by authorUsername prefix as best effort
+        q = query(
+          collection(db, "posts"),
+          where("visibility", "==", "public"),
+          where("authorUsername", ">=", keyword),
+          where("authorUsername", "<=", keyword + "\uf8ff"),
+          orderBy("authorUsername"),
           orderBy("createdAt", "desc"),
           limit(PAGE_SIZE + 1)
         );
@@ -189,8 +225,8 @@ export function ExplorePage() {
               {search.startsWith("#")
                 ? `Posts tagged ${search}`
                 : search.startsWith("@")
-                  ? `Posts by ${search}`
-                  : "Searching public posts"}
+                  ? `Searching people and posts for ${search}`
+                  : `Searching posts for "${search}"`}
             </p>
           )}
         </div>
@@ -208,6 +244,35 @@ export function ExplorePage() {
                 #{tag}
               </button>
             ))}
+          </div>
+        )}
+
+        {/* User results — shown when @username search */}
+        {userResults.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-medium text-text-muted uppercase tracking-wider">People</p>
+            <div className="bg-bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border/50">
+              {userResults.map((u) => (
+                <Link
+                  key={u.uid}
+                  href={`/@${u.username}`}
+                  className="flex items-center gap-3 px-4 py-3 hover:bg-bg-secondary transition-colors"
+                >
+                  <Avatar
+                    src={(u as { profilePhotoUrl?: string }).profilePhotoUrl}
+                    fallback={(u.displayName ?? u.username) as string}
+                    size="sm"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-text-primary truncate">{u.displayName}</p>
+                    <p className="text-xs text-text-muted">@{u.username}</p>
+                  </div>
+                  <span className="text-xs text-text-muted shrink-0">
+                    {(u as { followersCount?: number }).followersCount ?? 0} followers
+                  </span>
+                </Link>
+              ))}
+            </div>
           </div>
         )}
 

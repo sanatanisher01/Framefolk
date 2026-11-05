@@ -123,6 +123,8 @@ export async function loadStoriesGrouped(
   if (!db) return [];
 
   const now = new Date();
+
+  // Query 1: stories from people the user follows + public stories
   const q = query(
     collection(db, "stories"),
     where("isExpired", "==", false),
@@ -132,9 +134,47 @@ export async function loadStoriesGrouped(
     limit(100)
   );
 
-  const snap = await getDocs(q);
+  // Query 2: own stories (regardless of visibility)
+  const ownQ = query(
+    collection(db, "stories"),
+    where("authorUid", "==", currentUid),
+    where("isExpired", "==", false),
+    where("isDeleted", "==", false),
+    orderBy("createdAt", "desc"),
+    limit(20)
+  );
+
+  const [snap, ownSnap] = await Promise.all([getDocs(q), getDocs(ownQ)]);
   const groups = new Map<string, StoryAuthorGroup>();
 
+  // Process own stories first so they always appear
+  for (const d of ownSnap.docs) {
+    const data = d.data();
+    const uid = data.authorUid as string;
+    const story = {
+      id: d.id,
+      ...data,
+      expiresAt: data.expiresAt?.toDate() ?? new Date(),
+      createdAt: data.createdAt?.toDate() ?? new Date(),
+      updatedAt: data.updatedAt?.toDate() ?? new Date(),
+    } as Story;
+
+    if (!groups.has(uid)) {
+      groups.set(uid, {
+        authorUid: uid,
+        authorUsername: (data.authorUsername as string) ?? "",
+        authorPhotoUrl: (data.authorPhotoUrl as string) ?? "",
+        stories: [],
+        hasUnviewed: false,
+      });
+    }
+    const group = groups.get(uid)!;
+    if (!group.stories.find((s) => s.id === story.id)) {
+      group.stories.push(story);
+    }
+  }
+
+  // Process public/followers stories
   for (const d of snap.docs) {
     const data = d.data();
     const uid = data.authorUid as string;
@@ -155,7 +195,10 @@ export async function loadStoriesGrouped(
         hasUnviewed: false,
       });
     }
-    groups.get(uid)!.stories.push(story);
+    const group = groups.get(uid)!;
+    if (!group.stories.find((s) => s.id === story.id)) {
+      group.stories.push(story);
+    }
   }
 
   // Check which stories current user has viewed
@@ -173,7 +216,7 @@ export async function loadStoriesGrouped(
     }
   }
 
-  // Put current user's own stories first
+  // Own stories always first, then by unviewed
   const result = Array.from(groups.values());
   result.sort((a, b) => {
     if (a.authorUid === currentUid) return -1;

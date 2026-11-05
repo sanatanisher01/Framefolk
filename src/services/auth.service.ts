@@ -357,6 +357,21 @@ export async function followUser(
       readAt: null,
       createdAt: serverTimestamp(),
     }).catch(() => {});
+
+    // Auto-create conversation so they can message each other
+    const convId = [currentUid, targetUid].sort().join("_");
+    const convRef = doc(db, "conversations", convId);
+    const convSnap = await getDoc(convRef);
+    if (!convSnap.exists()) {
+      await setDoc(convRef, {
+        id: convId,
+        participants: [currentUid, targetUid],
+        lastMessage: null,
+        lastMessageAt: null,
+        unreadCounts: { [currentUid]: 0, [targetUid]: 0 },
+        createdAt: serverTimestamp(),
+      });
+    }
   }
 }
 
@@ -489,9 +504,39 @@ export async function acceptFollowRequest(
   );
 
   // Increment follower/following counts
-  const { increment } = await import("firebase/firestore");
-  await updateDoc(doc(db, "users", toUid), { followersCount: increment(1) });
-  await updateDoc(doc(db, "users", fromUid), { followingCount: increment(1) });
+  const { increment: inc, addDoc } = await import("firebase/firestore");
+  await updateDoc(doc(db, "users", toUid), { followersCount: inc(1) });
+  await updateDoc(doc(db, "users", fromUid), { followingCount: inc(1) });
+
+  // Notify the requester that their request was accepted
+  await addDoc(collection(db, "notifications"), {
+    recipientUid: fromUid,
+    senderUid: toUid,
+    senderUsername: "",  // will show from Firestore user doc on client
+    senderPhotoUrl: "",
+    type: "followAccepted",
+    entityType: "user",
+    entityId: toUid,
+    text: "Your follow request was accepted.",
+    isRead: false,
+    readAt: null,
+    createdAt: serverTimestamp(),
+  }).catch(() => {});
+
+  // Auto-create a conversation so they can message each other immediately
+  const convId = [fromUid, toUid].sort().join("_");
+  const convRef = doc(db, "conversations", convId);
+  const convSnap = await getDoc(convRef);
+  if (!convSnap.exists()) {
+    await setDoc(convRef, {
+      id: convId,
+      participants: [fromUid, toUid],
+      lastMessage: null,
+      lastMessageAt: null,
+      unreadCounts: { [fromUid]: 0, [toUid]: 0 },
+      createdAt: serverTimestamp(),
+    });
+  }
 }
 
 export async function rejectFollowRequest(
