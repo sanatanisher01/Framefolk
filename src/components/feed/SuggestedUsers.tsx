@@ -6,6 +6,8 @@ import { UserPlus } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { collection, doc, getDocs } from "firebase/firestore";
+import { db } from "@/lib/firebase/client";
 import { getSuggestedUsers } from "@/services/social.service";
 import { followUser } from "@/services/auth.service";
 import { cn } from "@/utils/cn";
@@ -30,10 +32,25 @@ export function SuggestedUsers({ currentUid, currentUser }: Props) {
 
   useEffect(() => {
     if (!currentUid) { setLoading(false); return; }
-    getSuggestedUsers(currentUid, 5)
-      .then((raw) => {
+
+    async function load() {
+      try {
+        // Get who the user already follows
+        let alreadyFollowing = new Set<string>();
+        if (db && currentUid) {
+          const followRef = collection(doc(db, "followers", currentUid), "following");
+          const followSnap = await getDocs(followRef);
+          alreadyFollowing = new Set(followSnap.docs.map((d) => d.id));
+        }
+
+        const raw = await getSuggestedUsers(currentUid!, 10);
+        // Filter out users already followed
+        const filtered = raw
+          .filter((u) => !alreadyFollowing.has(u.uid as string))
+          .slice(0, 5);
+
         setUsers(
-          raw.map((u) => ({
+          filtered.map((u) => ({
             uid: u.uid as string,
             username: (u.username as string) ?? "",
             displayName: (u.displayName as string) ?? "",
@@ -41,9 +58,14 @@ export function SuggestedUsers({ currentUid, currentUser }: Props) {
             followersCount: (u.followersCount as number) ?? 0,
           }))
         );
-      })
-      .catch(() => setUsers([]))
-      .finally(() => setLoading(false));
+      } catch {
+        setUsers([]);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    load();
   }, [currentUid]);
 
   async function handleFollow(uid: string) {

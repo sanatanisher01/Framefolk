@@ -53,11 +53,13 @@ export function ChatWindow({ conversationId, currentUid, onBack }: Props) {
     setLoading(true);
     const unsub = subscribeToMessages(conversationId, (msgs) => {
       setMessages(msgs);
-      setLoading(false);
+      setLoading(false); // fires even with 0 messages
     });
     // Mark as read
     markMessagesRead(conversationId, currentUid).catch(() => {});
-    return unsub;
+    // Safety timeout — if no snapshot in 3s, stop spinning
+    const timeout = setTimeout(() => setLoading(false), 3000);
+    return () => { unsub(); clearTimeout(timeout); };
   }, [conversationId, currentUid]);
 
   // Auto-scroll to bottom
@@ -75,13 +77,16 @@ export function ChatWindow({ conversationId, currentUid, onBack }: Props) {
   }, [conversationId, currentUid, typingTimeout]);
 
   async function handleSend() {
-    if (!text.trim() || sending || !partner) return;
+    if (!text.trim() || sending) return;
+    // Get partner UID from conversation ID (format: uid1_uid2 sorted)
+    const partnerUid = partner?.uid ?? conversationId.split("_").find((id) => id !== currentUid) ?? "";
+    if (!partnerUid) return;
     setSending(true);
     const msg = text.trim();
     setText("");
     setTyping(conversationId, currentUid, false).catch(() => {});
     try {
-      await sendMessage(conversationId, currentUid, partner.uid, msg);
+      await sendMessage(conversationId, currentUid, partnerUid, msg);
     } catch {
       setText(msg); // restore on failure
     } finally {
