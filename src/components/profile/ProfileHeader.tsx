@@ -20,6 +20,8 @@ import {
   DialogDescription, DialogFooter,
 } from "@/components/ui/Dialog";
 import { useToast } from "@/hooks/useToast";
+import { doc, getDoc, onSnapshot } from "firebase/firestore";
+import { db } from "@/lib/firebase/client";
 import {
   followUser, unfollowUser, isFollowing, hasPendingFollowRequest,
   blockUser, reportUser,
@@ -48,30 +50,30 @@ export function ProfileHeader({ user, isOwnProfile, currentUid, isApproved }: Pr
   const [reportDone, setReportDone] = useState(false);
   const [copyDone, setCopyDone] = useState(false);
 
-  // Load follow state
+  // Load follow state — real-time subscription so it updates
+  // immediately when a follow request is accepted in another tab
   useEffect(() => {
-    if (!currentUid || isOwnProfile) return;
-    let cancelled = false;
+    if (!currentUid || isOwnProfile || !db) return;
 
-    async function loadFollowState() {
-      if (!currentUid) return;
-      try {
-        const [following, pending] = await Promise.all([
-          isFollowing(currentUid, user.uid),
-          hasPendingFollowRequest(currentUid, user.uid),
-        ]);
-        if (!cancelled) {
-          if (following) setFollowState("following");
-          else if (pending) setFollowState("requested");
-          else setFollowState("idle");
-        }
-      } catch {
-        if (!cancelled) setFollowState("idle");
+    // Subscribe to the follower doc — exists = following
+    const followRef = doc(db, "followers", currentUid, "following", user.uid);
+    const unsubFollow = onSnapshot(followRef, (snap) => {
+      if (snap.exists()) {
+        setFollowState("following");
+        return;
       }
-    }
+      // Not following — check for pending request doc
+      const reqRef = doc(db!, "followRequests", `${currentUid}_${user.uid}`);
+      getDoc(reqRef).then((reqSnap) => {
+        if (reqSnap.exists() && reqSnap.data().status === "pending") {
+          setFollowState("requested");
+        } else {
+          setFollowState("idle");
+        }
+      }).catch(() => setFollowState("idle"));
+    });
 
-    loadFollowState();
-    return () => { cancelled = true; };
+    return unsubFollow;
   }, [currentUid, user.uid, isOwnProfile]);
 
   async function handleFollow() {
