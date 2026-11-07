@@ -45,6 +45,8 @@ For Vercel, set **server-only** environment variables in the project settings fo
 
 The service identity must have access to Firestore and Firebase Authentication, including user lookups for token revocation checks. Public browser Firebase configuration alone cannot authorize server requests. Do not commit credentials or prefix them with `NEXT_PUBLIC_`. If server authentication fails, the API returns 503 rather than incorrectly asking an already signed-in user to sign in again.
 
+The app pins Node 22 in `package.json`, matching the tested runtime and the installed Firebase Admin/Firestore SDK engine requirements. The public deployment check after `8ccd70b` confirmed the new Explore bundle was live, but all three tested API routes returned HTML 500 responses even without authorization headers. Locally, the production `/api/platform` returned the expected JSON 401. This remaining deployment startup failure requires the Vercel runtime log to diagnose; it is not evidence of an expired user session or missing credentials alone.
+
 ## Required before live rollout
 
 1. **Rotate the exposed central Cloudinary API secret.** A real secret was present in tracked `.env.production`; its current value has been removed from that file, but Git history still contains it. Set the replacement in secure hosting/Functions environment configuration. Never commit replacement credentials.
