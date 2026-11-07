@@ -205,6 +205,31 @@ async function main() {
   await batch.commit();await seedPost("thirty-first", "followed30");
   const page=await api(eve,"posts",{mode:"feed",pageSize:100});assert(page.posts.some(p=>p.id==="thirty-first"));
  });
+ await check("people search matches names without @ and scans beyond the first page", async () => {
+  const batch = db.batch();
+  for (let i = 0; i < 105; i++) batch.set(db.doc(`users/search-fixture-${String(i).padStart(3,"0")}`), {status:"approved",username:`fixture${i}`,displayName:`Fixture ${i}`});
+  batch.set(db.doc("users/zz-search-target"), {status:"approved",username:"camera.artist",displayName:"Unique Photographer",email:"private@example.test"});
+  batch.set(db.doc("users/zz-search-inactive"), {status:"suspended",username:"camera.inactive",displayName:"Unique Photographer"});
+  batch.set(db.doc("users/zz-search-blocked"), {status:"approved",username:"camera.blocked",displayName:"Unique Photographer"});
+  batch.set(db.doc("blocks/eve_zz-search-blocked"), {blockerUid:"eve",blockedUid:"zz-search-blocked"});
+  await batch.commit();
+  const matches = await api(eve,"searchUsers",{search:"UNIQUE PHOTO",count:30});
+  assert.deepEqual(matches.map(u=>u.uid),["zz-search-target"]);assert.equal(matches[0].email,undefined);
+  assert((await api(eve,"searchUsers",{search:"@CAMERA.ART",count:30})).some(u=>u.uid==="zz-search-target"));
+  assert.equal((await api(eve,"searchUsers",{search:"@unique photo",count:30})).length,0);
+  assert((await api(eve,"searchUsers",{search:"eve",count:30})).some(u=>u.uid==="eve"));
+ });
+ await check("server credential failures are not reported as expired user sessions", async () => {
+  const original = adminAuth.verifyIdToken;
+  const originalLog = console.error;
+  try {
+   console.error = () => {};
+   adminAuth.verifyIdToken = async () => { throw Object.assign(new Error("No credentials"),{code:"app/invalid-credential"}); };
+   await api(eve,"posts",{},503);
+   adminAuth.verifyIdToken = async () => { throw Object.assign(new Error("Expired"),{code:"auth/id-token-expired"}); };
+   await api(eve,"posts",{},401);
+  } finally { adminAuth.verifyIdToken = original; console.error = originalLog; }
+ });
  await check("owners can create albums and initial owner membership atomically", async () => {
   const batch=writeBatch(privateUser.db);
   batch.set(doc(privateUser.db,"albums/new-album"),{ownerUid:"privateuser",visibility:"private",type:"collaborative",title:"Test album",mediaCount:0,memberCount:1,createdAt:new Date(),updatedAt:new Date()});

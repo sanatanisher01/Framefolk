@@ -45,16 +45,29 @@ export async function POST(request: Request) {
       const page = await db.collection("media").where("ownerUid", "==", uid).orderBy("createdAt", "desc").limit(100).get();
       return NextResponse.json(serialize(page.docs.filter(d => d.data().postId && !d.data().albumId).map(d => ({ ...d.data(), id: d.id }))));
     } else if (action === "suggestedUsers" || action === "searchUsers") {
-      const term = typeof data.search === "string" ? data.search.replace(/^@/, "").trim().toLowerCase() : "";
-      let q = db.collection("users").where("status", "==", "approved").where("username", ">", "").orderBy("username").limit(100);
-      if (term) q = db.collection("users").where("status", "==", "approved").where("username", ">=", term).where("username", "<=", term + "\uf8ff").orderBy("username").limit(100);
+      const term = typeof data.search === "string" ? data.search.trim().replace(/^@/, "").trim().toLowerCase() : "";
+      const usernameOnly = typeof data.search === "string" && data.search.trim().startsWith("@");
+      // A single-field query works before optional composite indexes are deployed.
+      // Paginate through candidates so followed/blocked users cannot hide later matches.
+      const base = db.collection("users").where("status", "==", "approved");
       const users = [];
+      const count = Math.max(1, Math.min(30, Math.floor(Number(data.count) || 5)));
       const following = action === "suggestedUsers" ? new Set((await db.collection(`followers/${uid}/following`).get()).docs.map(d => d.id)) : null;
-      for (const d of (await q.get()).docs) {
-        if (d.id === uid || following?.has(d.id) || await blocked(uid, d.id)) continue;
-        const { email: _email, ...profile } = d.data();
-        users.push({ ...profile, uid: d.id });
-        if (users.length >= Math.min(30, Number(data.count) || 5)) break;
+      let candidates = await base.limit(100).get();
+      while (!candidates.empty) {
+        for (const d of candidates.docs) {
+          const profile = d.data();
+          const username = String(profile.username ?? "").toLowerCase();
+          const name = String(profile.displayName ?? "").toLowerCase();
+          if (!username || (following && (d.id === uid || following.has(d.id)))) continue;
+          if (term && !(username.includes(term) || (!usernameOnly && name.includes(term)))) continue;
+          if (await blocked(uid, d.id)) continue;
+          delete profile.email;
+          users.push({ ...profile, uid: d.id });
+          if (users.length >= count) break;
+        }
+        if (users.length >= count || candidates.size < 100) break;
+        candidates = await base.startAfter(candidates.docs[candidates.docs.length - 1]).limit(100).get();
       }
       return NextResponse.json(serialize(users));
     } else if (action === "user") {

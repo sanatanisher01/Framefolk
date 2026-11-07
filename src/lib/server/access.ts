@@ -8,8 +8,13 @@ export class RequestError extends Error {
 export async function requestUser(request: Request, allowInactive = false) {
   const token = request.headers.get("authorization")?.match(/^Bearer (.+)$/)?.[1];
   if (!token) throw new RequestError("Sign in required.", 401);
-  const decoded = await getAdminAuth().verifyIdToken(token, true).catch(() => {
-    throw new RequestError("Your session expired. Please sign in again.", 401);
+  const decoded = await Promise.resolve().then(() => getAdminAuth().verifyIdToken(token, true)).catch((error: unknown) => {
+    const code = (error as { code?: string })?.code;
+    if (["auth/id-token-expired", "auth/id-token-revoked", "auth/argument-error", "auth/invalid-id-token", "auth/user-disabled", "auth/user-not-found"].includes(code ?? "")) {
+      throw new RequestError("Your session expired. Please sign in again.", 401);
+    }
+    console.error("Firebase server authentication failed", error);
+    throw new RequestError("The server cannot connect to Firebase. Please contact the site administrator.", 503);
   });
   const db = getAdminDb();
   const ref = db.collection("users").doc(decoded.uid);

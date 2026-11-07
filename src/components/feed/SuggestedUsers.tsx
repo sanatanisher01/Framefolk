@@ -6,8 +6,6 @@ import { UserPlus } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { collection, doc, getDocs } from "firebase/firestore";
-import { db } from "@/lib/firebase/client";
 import { getSuggestedUsers } from "@/services/social.service";
 import { followUser } from "@/services/auth.service";
 import { cn } from "@/utils/cn";
@@ -28,27 +26,20 @@ interface Props {
 export function SuggestedUsers({ currentUid, currentUser }: Props) {
   const [users, setUsers] = useState<SuggestedUser[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
   const [followed, setFollowed] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!currentUid) { setLoading(false); return; }
 
+    let active = true;
+    setLoading(true);
+    setError(null);
     async function load() {
       try {
-        // Get who the user already follows
-        let alreadyFollowing = new Set<string>();
-        if (db && currentUid) {
-          const followRef = collection(doc(db, "followers", currentUid), "following");
-          const followSnap = await getDocs(followRef);
-          alreadyFollowing = new Set(followSnap.docs.map((d) => d.id));
-        }
-
-        const raw = await getSuggestedUsers(currentUid!, 10);
-        // Filter out users already followed
-        const filtered = raw
-          .filter((u) => !alreadyFollowing.has(u.uid as string))
-          .slice(0, 5);
-
+        const filtered = await getSuggestedUsers(currentUid!, 5);
+        if (!active) return;
         setUsers(
           filtered.map((u) => ({
             uid: u.uid as string,
@@ -58,15 +49,18 @@ export function SuggestedUsers({ currentUid, currentUser }: Props) {
             followersCount: (u.followersCount as number) ?? 0,
           }))
         );
-      } catch {
+      } catch (error) {
+        if (!active) return;
+        setError(error instanceof Error ? error.message : "Could not load suggestions.");
         setUsers([]);
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     }
 
-    load();
-  }, [currentUid]);
+    void load();
+    return () => { active = false; };
+  }, [currentUid, retry]);
 
   async function handleFollow(uid: string) {
     if (!currentUid) return;
@@ -97,6 +91,8 @@ export function SuggestedUsers({ currentUid, currentUser }: Props) {
           </Link>
         </div>
       )}
+
+      {error && <div role="alert" className="text-xs text-text-secondary"><p>{error}</p><button className="text-accent mt-2" onClick={() => setRetry(n => n + 1)}>Retry suggestions</button></div>}
 
       {users.length > 0 || loading ? (
         <div className="flex flex-col gap-1">

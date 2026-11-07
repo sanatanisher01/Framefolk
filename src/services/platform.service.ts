@@ -10,7 +10,12 @@ export async function platformRequest<T = void>(action: string, payload: Record<
     body: JSON.stringify({ action, ...payload }),
   });
   const text = await response.text();
-  const body = text ? JSON.parse(text, (_key, value) => value && typeof value === "object" && value.$date ? new Date(value.$date) : value) : null;
+  let body;
+  try {
+    body = text ? JSON.parse(text, (_key, value) => value && typeof value === "object" && value.$date ? new Date(value.$date) : value) : null;
+  } catch {
+    throw new Error("The server is unavailable. Please retry in a moment.");
+  }
   if (!response.ok) throw new Error(body?.error ?? "Request failed. Please try again.");
   if (!["posts", "stories", "albums", "conversations", "user", "albumMediaPage", "suggestedUsers", "searchUsers", "myMedia"].includes(action) && typeof window !== "undefined") window.dispatchEvent(new Event("framefolk:updated"));
   return body as T;

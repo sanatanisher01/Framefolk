@@ -1,4 +1,4 @@
-const CACHE_VERSION = "mw6qzex0";
+const CACHE_VERSION = "mw6scm7z";
 const STATIC_CACHE = `framefolk-static-${CACHE_VERSION}`;
 const STATIC_PRECACHE = ["/offline", "/manifest.json", "/favicon.svg"];
 self.addEventListener("install", event => {

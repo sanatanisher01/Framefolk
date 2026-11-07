@@ -31,7 +31,19 @@ npm run test:integration
 
 The integration runner uses isolated local Auth/Firestore emulators and the `demo-framefolk` project. It does not connect to production. It requires Java, Firebase CLI's Auth emulator package, and the cached Firestore emulator JAR. Override `FIREBASE_TOOLS_PATH` or `FIRESTORE_EMULATOR_JAR` if installed elsewhere. Loopback connections must be permitted.
 
-27 emulator integration checks passed. The suite covers authorization failures and successful transactions, privacy, blocking, pagination, counts/idempotency, messaging, collaboration, notifications, credential encryption, upload signing, and moderator permissions. Browser checks verified login, sending a local demo message, and creating/opening an album.
+The emulator suite covers authorization failures and successful transactions, privacy, blocking, pagination, counts/idempotency, messaging, collaboration, notifications, credential encryption, upload signing, and moderator permissions. It also checks name/username search beyond the first directory page and distinguishes server credential failures from expired sessions. Earlier browser checks verified login, sending a local demo message, and creating/opening an album.
+
+## Feed and people search follow-up
+
+People search now accepts display names and usernames without requiring `@`. Results load independently of posts and ignore stale responses. Directory pagination uses a single-field status query, avoiding the status/username composite-index prerequisite. Blocked/inactive accounts and private emails remain excluded. A failed individual media read no longer discards the feed. Suggestions and Explore show request failures with retry controls instead of silently showing empty results.
+
+For Vercel, set **server-only** environment variables in the project settings for the active deployment environment, then redeploy:
+
+- `FIREBASE_PROJECT_ID`: the same project as `NEXT_PUBLIC_FIREBASE_PROJECT_ID`.
+- Either `FIREBASE_SERVICE_ACCOUNT_JSON` containing the full service-account JSON, or both `FIREBASE_CLIENT_EMAIL` and `FIREBASE_PRIVATE_KEY`. The split private-key value accepts literal `\n` line breaks.
+- On Google-hosted servers, Application Default Credentials from the service identity can be used instead.
+
+The service identity must have access to Firestore and Firebase Authentication, including user lookups for token revocation checks. Public browser Firebase configuration alone cannot authorize server requests. Do not commit credentials or prefix them with `NEXT_PUBLIC_`. If server authentication fails, the API returns 503 rather than incorrectly asking an already signed-in user to sign in again.
 
 ## Required before live rollout
 

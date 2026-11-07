@@ -4,12 +4,6 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
-import {
-  collection, query, where, orderBy, limit,
-  getDocs, startAfter, getDoc, doc,
-  type QueryDocumentSnapshot,
-} from "firebase/firestore";
-import { db } from "@/lib/firebase/client";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { MobileHeader } from "@/components/layout/MobileHeader";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -17,15 +11,13 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
 import { Input } from "@/components/ui/Input";
 import { Avatar } from "@/components/ui/Avatar";
-import { buildImageUrl, buildVideoThumbnail } from "@/lib/cloudinary/config";
-import { Search, Grid3x3, Play, Images, Users } from "lucide-react";
+import { Search, Grid3x3, Play, Images } from "lucide-react";
 import { useDebounce } from "@/hooks/useDebounce";
 import { getSignedDeliveryUrl } from "@/services/upload.service";
 import { platformRequest } from "@/services/platform.service";
-import type { Post, Media, User } from "@/types";
+import type { Post, User } from "@/types";
 
 const PAGE_SIZE = 24;
-const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME ?? "";
 
 interface PostWithThumb {
   post: Post;
@@ -47,6 +39,11 @@ export function ExplorePage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [peopleError, setPeopleError] = useState<string | null>(null);
+  const [peopleLoading, setPeopleLoading] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const generation = useRef(0);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   async function resolveThumb(post: Post): Promise<PostWithThumb> {
@@ -61,32 +58,12 @@ export function ExplorePage() {
 
   const loadPosts = useCallback(
     async (afterCursor?: string) => {
-      if (!db) return;
-
-      const tag = debouncedSearch.startsWith("#")
-        ? debouncedSearch.slice(1).toLowerCase().trim()
-        : null;
-      const username = debouncedSearch.startsWith("@")
-        ? debouncedSearch.slice(1).toLowerCase().trim()
-        : null;
-      const keyword = !tag && !username && debouncedSearch.trim()
-        ? debouncedSearch.trim().toLowerCase()
-        : null;
-
-      // ── User search when @username is typed ──────────────────────────────
-      if (username && !afterCursor) {
-        setUserResults([]);
-        try {
-          setUserResults(await platformRequest<Partial<User>[]>("searchUsers", { search: username, count: 5 }));
-        } catch { /* ignore */ }
-      } else if (!afterCursor) {
-        setUserResults([]);
-      }
-
+      const requestGeneration = generation.current;
       const page = await platformRequest<{ posts: Post[]; cursor: string | null }>("posts", { mode: "explore", search: debouncedSearch, cursor: afterCursor, pageSize: PAGE_SIZE });
       const rawPosts = page.posts;
       const resolved = await Promise.all(rawPosts.map(resolveThumb));
 
+      if (requestGeneration !== generation.current) return;
       if (afterCursor) {
         setItems((prev) => [...prev, ...resolved]);
       } else {
@@ -100,17 +77,39 @@ export function ExplorePage() {
   );
 
   useEffect(() => {
+    const current = ++generation.current;
     setLoading(true);
+    setError(null);
+    setItems([]);
     setCursor(null);
-    loadPosts().catch(error => { console.error(error); setItems([]); }).finally(() => setLoading(false));
-  }, [loadPosts]);
+    setHasMore(false);
+    loadPosts().catch(error => {
+      if (current === generation.current) setError(error instanceof Error ? error.message : "Could not load posts.");
+    }).finally(() => { if (current === generation.current) setLoading(false); });
+    return () => { generation.current = current + 1; };
+  }, [loadPosts, retry]);
+
+  useEffect(() => {
+    let active = true;
+    const term = debouncedSearch.trim();
+    setUserResults([]);
+    setPeopleError(null);
+    setPeopleLoading(false);
+    if (!term || term.startsWith("#")) return;
+    setPeopleLoading(true);
+    platformRequest<Partial<User>[]>("searchUsers", { search: term, count: 30 })
+      .then(users => { if (active) setUserResults(users); })
+      .catch(error => { if (active) setPeopleError(error instanceof Error ? error.message : "Could not search people."); })
+      .finally(() => { if (active) setPeopleLoading(false); });
+    return () => { active = false; };
+  }, [debouncedSearch, retry]);
 
   useEffect(() => {
     const el = sentinelRef.current;
     if (!el) return;
     const obs = new IntersectionObserver(
       async (entries) => {
-        if (entries[0].isIntersecting && hasMore && !loadingMore && cursor) {
+        if (entries[0].isIntersecting && !loading && hasMore && !loadingMore && cursor) {
           setLoadingMore(true);
           await loadPosts(cursor).catch(() => {});
           setLoadingMore(false);
@@ -141,7 +140,7 @@ export function ExplorePage() {
         <div className="max-w-lg">
           <Input
             type="search"
-            placeholder="Search #hashtags, @users or keywords"
+            placeholder="Search people, @usernames or #hashtags"
             value={search}
             onChange={handleSearchChange}
             leftIcon={<Search className="h-4 w-4" />}
@@ -153,7 +152,7 @@ export function ExplorePage() {
                 ? `Posts tagged ${search}`
                 : search.startsWith("@")
                   ? `Searching people and posts for ${search}`
-                  : `Searching posts for "${search}"`}
+                  : `Searching people and posts for "${search}"`}
             </p>
           )}
         </div>
@@ -174,7 +173,12 @@ export function ExplorePage() {
           </div>
         )}
 
-        {/* User results — shown when @username search */}
+        {peopleLoading && <p className="text-sm text-text-muted">Searching people…</p>}
+        {peopleError && <EmptyState title={peopleError} actionLabel="Retry" onAction={() => setRetry(n => n + 1)} />}
+        {!peopleLoading && !peopleError && debouncedSearch.trim() && !debouncedSearch.trim().startsWith("#") && !userResults.length && (
+          <p className="text-sm text-text-muted">No people found.</p>
+        )}
+        {/* People load independently of posts. */}
         {userResults.length > 0 && (
           <div className="flex flex-col gap-2">
             <p className="text-xs font-medium text-text-muted uppercase tracking-wider">People</p>
@@ -204,7 +208,9 @@ export function ExplorePage() {
         )}
 
         {/* Grid */}
-        {loading ? (
+        {error ? (
+          <EmptyState title={error} actionLabel="Retry" onAction={() => setRetry(n => n + 1)} />
+        ) : loading ? (
           <div className="grid grid-cols-3 gap-0.5">
             {Array.from({ length: 12 }).map((_, i) => (
               <Skeleton key={i} className="aspect-square rounded-none" />

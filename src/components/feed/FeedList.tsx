@@ -1,11 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import {
-  collection, query, where, orderBy, limit,
-  getDocs, startAfter, doc, getDoc,
-  type QueryDocumentSnapshot,
-} from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { PostCard } from "./PostCard";
 import { PostSkeleton } from "@/components/ui/Skeleton";
@@ -43,8 +39,8 @@ export function FeedList({ currentUid, currentUsername, currentPhotoUrl, followi
         if (!post.mediaIds?.length) return;
         const mediaItems = await Promise.all(
           post.mediaIds.slice(0, 10).map(async (mid) => {
-            const snap = await getDoc(doc(db!, "media", mid));
-            return snap.exists() ? { id: snap.id, ...snap.data() } as Partial<Media> : null;
+            const snap = await getDoc(doc(db!, "media", mid)).catch(() => null);
+            return snap?.exists() ? { id: snap.id, ...snap.data() } as Partial<Media> : null;
           })
         );
         updates[post.id] = mediaItems.filter(Boolean) as Partial<Media>[];
@@ -76,7 +72,8 @@ export function FeedList({ currentUid, currentUsername, currentPhotoUrl, followi
   // Initial load
   useEffect(() => {
     setLoading(true);
-    loadPosts().catch(error => { console.error(error); setError("Could not load your feed. Please retry."); }).finally(() => setLoading(false));
+    setError(null);
+    loadPosts().catch(error => { console.error(error); setError(error instanceof Error ? error.message : "Could not load your feed. Please retry."); }).finally(() => setLoading(false));
   }, [loadPosts]);
 
   // Intersection observer for infinite scroll
@@ -97,7 +94,7 @@ export function FeedList({ currentUid, currentUsername, currentPhotoUrl, followi
     return () => obs.disconnect();
   }, [loading, hasMore, loadingMore, cursor, loadPosts]);
 
-  if (error) return <EmptyState title={error} actionLabel="Retry" onAction={() => { setError(null); setLoading(true); loadPosts().catch(() => setError("Could not load your feed. Please retry.")).finally(() => setLoading(false)); }} />;
+  if (error) return <EmptyState title={error} actionLabel="Retry" onAction={() => { setError(null); setLoading(true); loadPosts().catch(error => setError(error instanceof Error ? error.message : "Could not load your feed. Please retry.")).finally(() => setLoading(false)); }} />;
 
   if (loading) {
     return (
