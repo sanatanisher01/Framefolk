@@ -1,3 +1,4 @@
+import { requirePermission } from "../lib/security";
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 
@@ -11,12 +12,16 @@ export const suspendAccount = functions.https.onCall(
     const isAdmin = context.auth.token.role === "superAdmin" || context.auth.token.role === "moderator";
     if (!isAdmin) throw new functions.https.HttpsError("permission-denied", "Admins only.");
 
+    await requirePermission(context, "canBlockAccounts", data.targetUid);
+
     const { targetUid, reason, durationDays } = data;
+    if (!targetUid || (durationDays !== undefined && (!Number.isInteger(durationDays) || durationDays < 1 || durationDays > 365))) throw new functions.https.HttpsError("invalid-argument", "Invalid suspension duration.");
     const now = admin.firestore.FieldValue.serverTimestamp();
 
     const updateData: Record<string, unknown> = {
       status: "suspended",
       updatedAt: now,
+      suspensionExpiresAt: null,
     };
 
     if (durationDays) {

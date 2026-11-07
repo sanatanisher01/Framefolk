@@ -20,7 +20,7 @@ import {
   DialogDescription, DialogFooter,
 } from "@/components/ui/Dialog";
 import { useToast } from "@/hooks/useToast";
-import { doc, getDoc, onSnapshot } from "firebase/firestore";
+import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import {
   followUser, unfollowUser, isFollowing, hasPendingFollowRequest,
@@ -50,30 +50,45 @@ export function ProfileHeader({ user, isOwnProfile, currentUid, isApproved }: Pr
   const [reportDone, setReportDone] = useState(false);
   const [copyDone, setCopyDone] = useState(false);
 
-  // Load follow state — real-time subscription so it updates
-  // immediately when a follow request is accepted in another tab
+  // Sync optimisticFollowers when the prop changes (e.g. after real-time profile update)
+  useEffect(() => {
+    setOptimisticFollowers(user.followersCount);
+  }, [user.followersCount]);
+
+  // Real-time follow state — subscribe to BOTH the follower doc AND the follow request doc
   useEffect(() => {
     if (!currentUid || isOwnProfile || !db) return;
 
-    // Subscribe to the follower doc — exists = following
+    // Listener 1: follower doc — exists means currently following
     const followRef = doc(db, "followers", currentUid, "following", user.uid);
     const unsubFollow = onSnapshot(followRef, (snap) => {
       if (snap.exists()) {
         setFollowState("following");
+      } else { setFollowState(prev => prev === "requested" ? prev : "idle"); }
+    }, () => setFollowState("idle"));
+
+    // Listener 2: follow request doc — status "pending" means requested
+    const reqRef = doc(db, "followRequests", `${currentUid}_${user.uid}`);
+    const unsubReq = onSnapshot(reqRef, (snap) => {
+      if (!snap.exists()) {
+        // No request exists — only set idle if we're not already following
+        setFollowState((prev) => prev === "following" ? "following" : "idle");
         return;
       }
-      // Not following — check for pending request doc
-      const reqRef = doc(db!, "followRequests", `${currentUid}_${user.uid}`);
-      getDoc(reqRef).then((reqSnap) => {
-        if (reqSnap.exists() && reqSnap.data().status === "pending") {
-          setFollowState("requested");
-        } else {
-          setFollowState("idle");
-        }
-      }).catch(() => setFollowState("idle"));
+      const status = snap.data().status as string;
+      if (status === "pending") {
+        setFollowState("requested");
+      } else {
+        // accepted/rejected — the follower doc listener will handle "following",
+        // for rejected just go idle
+        setFollowState((prev) => prev === "following" ? "following" : "idle");
+      }
     });
 
-    return unsubFollow;
+    return () => {
+      unsubFollow();
+      unsubReq();
+    };
   }, [currentUid, user.uid, isOwnProfile]);
 
   async function handleFollow() {

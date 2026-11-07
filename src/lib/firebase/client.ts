@@ -37,10 +37,11 @@ function initFirebase() {
     process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === "true"
   ) {
     try {
-      connectAuthEmulator(auth, "http://127.0.0.1:9099", {
+      connectAuthEmulator(auth, `http://${process.env.NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_HOST || "127.0.0.1:9099"}`, {
         disableWarnings: true,
       });
-      connectFirestoreEmulator(db, "127.0.0.1", 8080);
+      const [host, port] = (process.env.NEXT_PUBLIC_FIREBASE_FIRESTORE_EMULATOR_HOST || "127.0.0.1:8080").split(":");
+      connectFirestoreEmulator(db, host, Number(port));
     } catch {
       // Emulators already connected (hot reload)
     }

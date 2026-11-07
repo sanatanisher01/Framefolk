@@ -1,302 +1,115 @@
 rules_version = '2';
-
-// FRAMEFOLK — Firestore Security Rules
-// Philosophy: authentication is the gate. Any signed-in user can use the platform.
-// Moderators/admins handle abuse via the admin dashboard.
-
 service cloud.firestore {
-  match /databases/{database}/documents {
-
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    function isOwner(uid) {
-      return isSignedIn() && request.auth.uid == uid;
-    }
-
-    function isModerator() {
-      return isSignedIn() &&
-        (request.auth.token.role == 'moderator' || request.auth.token.role == 'superAdmin');
-    }
-
-    // ── users ──────────────────────────────────────────────────────────────
-    match /users/{uid} {
-      allow read: if isSignedIn();
-      allow create: if isOwner(uid);
-      allow update: if isOwner(uid) || isModerator();
-      allow delete: if false;
-    }
-
-    // ── usernames ──────────────────────────────────────────────────────────
-    match /usernames/{username} {
-      allow read: if true;
-      allow create: if isSignedIn()
-                    && request.resource.data.uid == request.auth.uid;
-      allow delete: if isSignedIn();
-      allow update: if false;
-    }
-
-    // ── posts ──────────────────────────────────────────────────────────────
-    match /posts/{postId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn()
-                    && request.resource.data.authorUid == request.auth.uid;
-      allow update: if (isSignedIn() && resource.data.authorUid == request.auth.uid)
-                    || isModerator();
-      allow delete: if false;
-
-      match /likes/{likerUid} {
-        allow read: if isSignedIn();
-        allow create: if isOwner(likerUid);
-        allow delete: if isOwner(likerUid);
-        allow update: if false;
-      }
-
-      match /comments/{commentId} {
-        allow read: if isSignedIn();
-        allow create: if isSignedIn()
-                      && request.resource.data.authorUid == request.auth.uid;
-        allow update: if isSignedIn()
-                      && resource.data.authorUid == request.auth.uid;
-        allow delete: if false;
-
-        match /replies/{replyId} {
-          allow read: if isSignedIn();
-          allow create: if isSignedIn()
-                        && request.resource.data.authorUid == request.auth.uid;
-          allow update: if isSignedIn()
-                        && resource.data.authorUid == request.auth.uid;
-          allow delete: if false;
-        }
-      }
-    }
-
-    // ── media ──────────────────────────────────────────────────────────────
-    match /media/{mediaId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn()
-                    && request.resource.data.ownerUid == request.auth.uid;
-      allow update: if isSignedIn()
-                    && resource.data.ownerUid == request.auth.uid;
-      allow delete: if false;
-    }
-
-    // ── stories ────────────────────────────────────────────────────────────
-    match /stories/{storyId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn()
-                    && request.resource.data.authorUid == request.auth.uid;
-      allow update: if isSignedIn()
-                    && resource.data.authorUid == request.auth.uid;
-      allow delete: if false;
-    }
-
-    // ── storyViews ─────────────────────────────────────────────────────────
-    match /storyViews/{viewId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn()
-                    && request.resource.data.viewerUid == request.auth.uid;
-      allow update: if isSignedIn()
-                    && resource.data.viewerUid == request.auth.uid;
-      allow delete: if false;
-    }
-
-    // ── storyHighlights ────────────────────────────────────────────────────
-    match /storyHighlights/{highlightId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn()
-                    && request.resource.data.ownerUid == request.auth.uid;
-      allow update: if isSignedIn()
-                    && resource.data.ownerUid == request.auth.uid;
-      allow delete: if isSignedIn()
-                    && resource.data.ownerUid == request.auth.uid;
-    }
-
-    // ── followers ──────────────────────────────────────────────────────────
-    match /followers/{uid}/following/{targetUid} {
-      allow read: if isSignedIn();
-      allow create: if isOwner(uid);
-      allow delete: if isOwner(uid);
-      allow update: if false;
-    }
-
-    match /followers/{uid}/followers/{sourceUid} {
-      allow read: if isSignedIn();
-      allow create: if isOwner(uid);
-      allow delete: if isOwner(uid);
-      allow update: if false;
-    }
-
-    // ── followRequests ─────────────────────────────────────────────────────
-    match /followRequests/{requestId} {
-      allow read: if isSignedIn() && (
-                    resource.data.fromUid == request.auth.uid
-                    || resource.data.toUid == request.auth.uid
-                  );
-      allow create: if isSignedIn()
-                    && request.resource.data.fromUid == request.auth.uid;
-      allow update: if isSignedIn() && (
-                    resource.data.toUid == request.auth.uid
-                    || resource.data.fromUid == request.auth.uid
-                  );
-      allow delete: if isSignedIn()
-                    && resource.data.fromUid == request.auth.uid;
-    }
-
-    // ── conversations + messages ────────────────────────────────────────────
-    match /conversations/{conversationId} {
-      allow read: if isSignedIn()
-                  && request.auth.uid in resource.data.participants;
-      allow create: if isSignedIn()
-                    && request.auth.uid in request.resource.data.participants;
-      allow update: if isSignedIn()
-                    && request.auth.uid in resource.data.participants;
-      allow delete: if false;
-
-      match /messages/{messageId} {
-        allow read: if isSignedIn();
-        allow create: if isSignedIn()
-                      && request.resource.data.senderUid == request.auth.uid;
-        allow update: if isSignedIn()
-                      && resource.data.senderUid == request.auth.uid;
-        allow delete: if false;
-      }
-    }
-
-    // ── albums + members ───────────────────────────────────────────────────
-    match /albums/{albumId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn()
-                    && request.resource.data.ownerUid == request.auth.uid;
-      allow update: if isSignedIn()
-                    && resource.data.ownerUid == request.auth.uid;
-      allow delete: if false;
-    }
-
-    match /albumMembers/{memberId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isSignedIn()
-                    && resource.data.uid == request.auth.uid;
-      allow delete: if false;
-    }
-
-    // ── notifications ──────────────────────────────────────────────────────
-    match /notifications/{notificationId} {
-      allow read: if isSignedIn()
-                  && resource.data.recipientUid == request.auth.uid;
-      allow create: if isSignedIn();
-      allow update: if isSignedIn()
-                    && resource.data.recipientUid == request.auth.uid;
-      allow delete: if false;
-    }
-
-    // ── notificationPrefs ──────────────────────────────────────────────────
-    match /notificationPrefs/{uid} {
-      allow read: if isOwner(uid);
-      allow write: if isOwner(uid);
-    }
-
-    // ── bookmarks ──────────────────────────────────────────────────────────
-    match /bookmarks/{uid}/saved/{postId} {
-      allow read: if isOwner(uid);
-      allow create: if isOwner(uid);
-      allow delete: if isOwner(uid);
-      allow update: if false;
-    }
-
-    // ── blocks ─────────────────────────────────────────────────────────────
-    match /blocks/{blockId} {
-      allow read: if isSignedIn() && (
-                    resource.data.blockerUid == request.auth.uid
-                    || resource.data.blockedUid == request.auth.uid
-                  );
-      allow create: if isSignedIn()
-                    && request.resource.data.blockerUid == request.auth.uid;
-      allow delete: if isSignedIn()
-                    && resource.data.blockerUid == request.auth.uid;
-      allow update: if false;
-    }
-
-    // ── reports ────────────────────────────────────────────────────────────
-    match /reports/{reportId} {
-      allow read: if isSignedIn() && (
-                    resource.data.reporterUid == request.auth.uid
-                    || isModerator()
-                  );
-      allow create: if isSignedIn()
-                    && request.resource.data.reporterUid == request.auth.uid;
-      allow update: if isModerator();
-      allow delete: if false;
-    }
-
-    // ── deletionRequests ───────────────────────────────────────────────────
-    match /deletionRequests/{requestId} {
-      allow read: if isSignedIn() && (
-                    resource.data.requesterUid == request.auth.uid
-                    || isModerator()
-                  );
-      allow create: if isSignedIn()
-                    && request.resource.data.requesterUid == request.auth.uid;
-      allow update: if isModerator();
-      allow delete: if false;
-    }
-
-    // ── closeFriends ───────────────────────────────────────────────────────
-    match /closeFriends/{uid}/members/{friendUid} {
-      allow read: if isOwner(uid);
-      allow create: if isOwner(uid);
-      allow delete: if isOwner(uid);
-      allow update: if false;
-    }
-
-    // ── admin-only ─────────────────────────────────────────────────────────
-    match /roles/{uid} {
-      allow read: if isModerator() || isOwner(uid);
-      allow write: if false;
-    }
-
-    match /permissions/{uid} {
-      allow read: if isModerator() || isOwner(uid);
-      allow write: if false;
-    }
-
-    match /auditLogs/{logId} {
-      allow read: if isModerator();
-      allow create: if isModerator();
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    // ── cloudinaryConnections ──────────────────────────────────────────────
-    match /cloudinaryConnections/{connectionId} {
-      allow read: if isSignedIn()
-                  && resource.data.ownerUid == request.auth.uid;
-      allow write: if false;
-    }
-
-    // ── invitations ────────────────────────────────────────────────────────
-    match /invitations/{invitationId} {
-      allow read: if isSignedIn() && (
-                    resource.data.inviterUid == request.auth.uid
-                    || resource.data.inviteeUid == request.auth.uid
-                  );
-      allow create: if isSignedIn();
-      allow update: if isSignedIn()
-                    && resource.data.inviteeUid == request.auth.uid;
-      allow delete: if false;
-    }
-
-    // ── profiles ──────────────────────────────────────────────────────────
-    match /profiles/{uid} {
-      allow read: if isSignedIn();
-      allow write: if false;
-    }
-
-    // ── Deny everything else ───────────────────────────────────────────────
-    match /{document=**} {
-      allow read, write: if false;
-    }
+ match /databases/{database}/documents {
+  function signedIn() { return request.auth != null; }
+  function owner(uid) { return signedIn() && request.auth.uid == uid; }
+  function active() {
+   let u = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+   return signedIn() && (u.status == 'approved' || (u.status == 'suspended' && u.get('suspensionExpiresAt', null) != null && u.suspensionExpiresAt <= request.time));
   }
+  function moderator() { return active() && request.auth.token.get('role', '') in ['moderator', 'superAdmin']; }
+  function permission(name) { return moderator() && (request.auth.token.role == 'superAdmin' || get(/databases/$(database)/documents/permissions/$(request.auth.uid)).data.get(name, false)); }
+  function notBlocked(uid) {
+   return owner(uid) || (!exists(/databases/$(database)/documents/blocks/$(request.auth.uid + '_' + uid)) && !exists(/databases/$(database)/documents/blocks/$(uid + '_' + request.auth.uid)));
+  }
+  function following(uid) { return exists(/databases/$(database)/documents/followers/$(request.auth.uid)/following/$(uid)); }
+  function audience(d, uid) {
+   let u = get(/databases/$(database)/documents/users/$(uid)).data;
+   return active() && notBlocked(uid) && (owner(uid) || (u.status == 'approved' && (!u.isPrivate || following(uid)) &&
+    (d.visibility == 'public' || (d.visibility == 'followers' && following(uid)) ||
+    (d.visibility == 'custom' && request.auth.uid in d.get('customAudienceUids', [])) ||
+    (d.visibility == 'closeFriends' && exists(/databases/$(database)/documents/closeFriends/$(uid)/members/$(request.auth.uid))))));
+  }
+  function visiblePost(d) { return !d.isHidden && (d.get('scheduledFor', null) == null || d.scheduledFor <= request.time) && audience(d, d.authorUid); }
+  function postAccess(id) { return visiblePost(get(/databases/$(database)/documents/posts/$(id)).data); }
+  function storyAccess(id) {
+   let d = get(/databases/$(database)/documents/stories/$(id)).data;
+   return !d.isDeleted && !d.isExpired && d.expiresAt > request.time && audience(d, d.authorUid);
+  }
+  function albumAccess(id) {
+   let d = get(/databases/$(database)/documents/albums/$(id)).data;
+   return active() && !d.get('deleting', false) && notBlocked(d.ownerUid) && (owner(d.ownerUid) || audience(d, d.ownerUid) || get(/databases/$(database)/documents/albumMembers/$(id + '_' + request.auth.uid)).data.status == 'accepted');
+  }
+  function conversationAccess(id) {
+   let d = get(/databases/$(database)/documents/conversations/$(id)).data;
+   return active() && request.auth.uid in d.participants && d.participants.size() == 2 && notBlocked(d.participants[0]) && notBlocked(d.participants[1]);
+  }
+  match /users/{uid} {
+   allow read: if owner(uid) || moderator();
+   allow create: if owner(uid) && request.resource.data.uid == uid && request.resource.data.status == 'approved' && request.resource.data.username == '' && request.resource.data.followersCount == 0 && request.resource.data.followingCount == 0 && request.resource.data.postsCount == 0;
+   allow update: if owner(uid) && active() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName', 'bio', 'isPrivate', 'profilePhotoUrl', 'profilePhotoPublicId', 'coverPhotoUrl', 'coverPhotoPublicId', 'onboardingComplete', 'updatedAt', 'theme', 'isEmailVerified']);
+  }
+  match /usernames/{username} { allow read: if true; }
+  match /posts/{postId} {
+   allow read: if permission('canViewReports') || visiblePost(resource.data);
+   allow update: if permission('canHideContent') && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isHidden', 'updatedAt']);
+   match /likes/{uid} { allow read: if owner(uid) && active() && postAccess(postId); }
+   match /comments/{commentId} {
+    allow read: if active() && postAccess(postId);
+    match /replies/{replyId} { allow read: if active() && postAccess(postId); }
+   }
+  }
+  match /media/{id} {
+   allow read: if moderator() || (active() && notBlocked(resource.data.ownerUid) && (resource.data.get('albumId', null) != null ? albumAccess(resource.data.albumId) && (resource.data.get('postId', null) == null || !get(/databases/$(database)/documents/posts/$(resource.data.postId)).data.isHidden) : resource.data.get('postId', null) != null ? postAccess(resource.data.postId) : resource.data.get('storyId', null) != null ? storyAccess(resource.data.storyId) : owner(resource.data.ownerUid)));
+   allow create: if active() && owner(request.resource.data.ownerUid) && request.resource.data.cloudinaryPublicId.matches('framefolk/users/' + request.auth.uid + '/.*');
+  }
+  match /stories/{id} {
+   allow read: if storyAccess(id);
+   allow create: if active() && owner(request.resource.data.authorUid) && !request.resource.data.isDeleted && !request.resource.data.isExpired && request.resource.data.viewsCount == 0 && request.resource.data.reactionsCount == 0;
+  }
+  match /storyViews/{id} { allow read: if active() && (owner(resource.data.viewerUid) || owner(get(/databases/$(database)/documents/stories/$(resource.data.storyId)).data.authorUid)); }
+  match /storyHighlights/{id} {
+   allow read: if audience(resource.data, resource.data.ownerUid);
+   allow create: if active() && owner(request.resource.data.ownerUid);
+   allow update, delete: if active() && owner(resource.data.ownerUid);
+  }
+  match /followers/{uid}/{kind}/{otherUid} { allow read: if active(); }
+  match /followRequests/{id} {
+   allow get: if active() && (id.matches(request.auth.uid + '_.*') || id.matches('.*_' + request.auth.uid));
+   allow list: if active() && (owner(resource.data.fromUid) || owner(resource.data.toUid));
+  }
+  match /conversations/{id} {
+   allow read: if conversationAccess(id);
+   allow update: if conversationAccess(id) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['typing']) && request.resource.data.typing.diff(resource.data.get('typing', {})).affectedKeys().hasOnly([request.auth.uid]);
+   match /messages/{messageId} { allow read: if conversationAccess(id); }
+  }
+  match /albums/{id} {
+   allow read: if albumAccess(id);
+   allow create: if active() && owner(request.resource.data.ownerUid) && request.resource.data.mediaCount == 0 && request.resource.data.memberCount == 1;
+   allow update: if active() && owner(resource.data.ownerUid) && !resource.data.get('deleting', false) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['title', 'description', 'visibility', 'coverMediaId', 'updatedAt']);
+  }
+  match /albumMembers/{id} {
+   allow read: if active() && (owner(resource.data.uid) || albumAccess(resource.data.albumId));
+   allow create: if active() && owner(request.resource.data.uid) && request.resource.data.role == 'owner' && request.resource.data.status == 'accepted' && owner(getAfter(/databases/$(database)/documents/albums/$(request.resource.data.albumId)).data.ownerUid);
+  }
+  match /notifications/{id} {
+   allow read: if active() && owner(resource.data.recipientUid);
+   allow update: if active() && owner(resource.data.recipientUid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead', 'readAt']);
+  }
+  match /notificationPrefs/{uid} { allow read, write: if active() && owner(uid); }
+  match /bookmarks/{uid}/saved/{id} {
+   allow read, delete: if active() && owner(uid);
+   allow create: if active() && owner(uid) && postAccess(id);
+  }
+  match /blocks/{id} {
+   allow get: if active() && (id.matches(request.auth.uid + '_.*') || id.matches('.*_' + request.auth.uid));
+   allow list: if active() && (owner(resource.data.blockerUid) || owner(resource.data.blockedUid));
+   allow delete: if active() && owner(resource.data.blockerUid);
+  }
+  match /reports/{id} {
+   allow read: if permission('canViewReports') || (active() && owner(resource.data.reporterUid));
+   allow create: if active() && owner(request.resource.data.reporterUid) && request.resource.data.status == 'pending';
+  }
+  match /deletionRequests/{id} {
+   allow read: if permission('canApproveDeleteRequests') || (active() && owner(resource.data.requesterUid));
+   allow create: if active() && owner(request.resource.data.requesterUid) && request.resource.data.status == 'pending' && request.resource.data.entityType == 'post' && owner(get(/databases/$(database)/documents/posts/$(request.resource.data.entityId)).data.authorUid);
+  }
+  match /closeFriends/{uid}/members/{friendUid} { allow read, write: if active() && owner(uid); }
+  match /roles/{uid} { allow read: if moderator() || owner(uid); }
+  match /permissions/{uid} { allow read: if moderator() || owner(uid); }
+  match /auditLogs/{id} { allow read: if permission('canViewAuditLogs'); }
+  match /cloudinaryConnections/{uid} { allow read: if active() && owner(uid); }
+  match /invitations/{id} { allow read: if active() && (owner(resource.data.inviterUid) || owner(resource.data.inviteeUid)); }
+  match /{document=**} { allow read, write: if false; }
+ }
 }

@@ -1,19 +1,4 @@
-
-PS E:\My_social_media\framefolk> cd "e:\My_social_media" ; cd "e:\My_social_media\framefolk"; git commit --allow-empty -m "chore: force clean Vercel rebuild - Next.js 15.3.3"; git push origin master 2>&1 | Select-Object -Last 5
-[master 915a4f6] chore: force clean Vercel rebuild - Next.js 15.3.3
-git : To https://github.com/sanatanisher01/Framefolk.git
-At line:1 char:144
-+ ... Vercel rebuild - Next.js 15.3.3"; git push origin master 2>&1 | Selec ...
-+                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (To https://gith...1/Framefolk.git:String)  
-   [], RemoteException
-    + FullyQualifiedErrorId : NativeCommandError
- 
-   e4a5a13..915a4f6  master -> master{
-  "extends": ["next/core-web-vitals", "next/typescript"],
-  "rules": {
-    "@typescript-eslint/no-unused-vars": "warn",
-    "@typescript-eslint/no-explicit-any": "warn",
-    "no-unused-vars": "warn"
-  }
+{
+ "extends": ["next/core-web-vitals"],
+ "rules": { "@next/next/no-img-element": "off" }
 }

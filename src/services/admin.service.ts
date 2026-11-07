@@ -1,9 +1,7 @@
 /**
  * FRAMEFOLK — Admin Service
  * Loads platform stats, manages users, reports, deletion requests, audit logs.
- * Privileged mutations fall back to direct Firestore writes when Cloud Functions
- * are unavailable (Spark plan). When on Blaze plan + functions deployed, the
- * callable wrappers below will call the Cloud Functions instead.
+ * Privileged mutations use authenticated Cloud Functions and propagate failures.
  */
 "use client";
 
@@ -19,7 +17,7 @@ import { getApp } from "firebase/app";
 
 // ─────────────────────────────────────────────
 // Callable Cloud Function helpers
-// Falls back to direct Firestore writes when functions aren't deployed.
+// Authorization failures are never bypassed with direct Firestore writes.
 // ─────────────────────────────────────────────
 
 let _functions: ReturnType<typeof getFunctions> | null = null;
@@ -34,173 +32,27 @@ function currentUid(): string {
 }
 
 export async function callApproveAccount(targetUid: string, note?: string): Promise<void> {
-  if (!db) throw new Error("Firebase not configured");
-  try {
-    // Try Cloud Function first (works on Blaze plan)
-    const fn = httpsCallable(fns(), "approveAccount");
-    await fn({ targetUid, note });
-    return;
-  } catch {
-    // Cloud Function not available — apply changes directly via Firestore
-  }
-
-  const now = serverTimestamp();
-  const adminUid = currentUid();
-
-  // 1. Update user status
-  await updateDoc(doc(db, "users", targetUid), {
-    status: "approved",
-    approvedAt: now,
-    updatedAt: now,
-  });
-
-  // 2. Notify the user
-  await addDoc(collection(db, "notifications"), {
-    recipientUid: targetUid,
-    senderUid: adminUid,
-    senderUsername: "FRAMEFOLK",
-    senderPhotoUrl: "",
-    type: "adminAction",
-    entityType: "user",
-    entityId: targetUid,
-    text: "Your account has been approved! Welcome to FRAMEFOLK.",
-    isRead: false,
-    createdAt: now,
-    readAt: null,
-  }).catch(() => {});
-
-  // 3. Audit log
-  await addDoc(collection(db, "auditLogs"), {
-    actorUid: adminUid,
-    actorRole: "moderator",
-    action: "accountApproved",
-    targetUid,
-    targetEntityType: "user",
-    targetEntityId: targetUid,
-    previousValue: { status: "pending" },
-    newValue: { status: "approved" },
-    reason: note ?? null,
-    ipAddress: null,
-    createdAt: now,
-  }).catch(() => {});
+ await httpsCallable(fns(), "approveAccount")({ targetUid, ...(note ? { note } : {}) });
 }
 
 export async function callRejectAccount(targetUid: string, reason: string): Promise<void> {
-  if (!db) throw new Error("Firebase not configured");
-  try {
-    const fn = httpsCallable(fns(), "rejectAccount");
-    await fn({ targetUid, reason });
-    return;
-  } catch {
-    // Cloud Function not available — apply directly
-  }
-
-  const now = serverTimestamp();
-  const adminUid = currentUid();
-
-  await updateDoc(doc(db, "users", targetUid), {
-    status: "rejected",
-    updatedAt: now,
-  });
-
-  await addDoc(collection(db, "notifications"), {
-    recipientUid: targetUid,
-    senderUid: adminUid,
-    senderUsername: "FRAMEFOLK",
-    senderPhotoUrl: "",
-    type: "adminAction",
-    entityType: "user",
-    entityId: targetUid,
-    text: "Your registration was not approved. Contact support for more information.",
-    isRead: false,
-    createdAt: now,
-    readAt: null,
-  }).catch(() => {});
-
-  await addDoc(collection(db, "auditLogs"), {
-    actorUid: adminUid,
-    actorRole: "moderator",
-    action: "accountRejected",
-    targetUid,
-    targetEntityType: "user",
-    targetEntityId: targetUid,
-    previousValue: { status: "pending" },
-    newValue: { status: "rejected" },
-    reason,
-    ipAddress: null,
-    createdAt: now,
-  }).catch(() => {});
+ await httpsCallable(fns(), "rejectAccount")({ targetUid, reason });
 }
 
 export async function callBlockAccount(targetUid: string, reason: string): Promise<void> {
-  if (!db) throw new Error("Firebase not configured");
-  try {
-    const fn = httpsCallable(fns(), "blockAccount");
-    await fn({ targetUid, reason });
-    return;
-  } catch { /* fall through */ }
-
-  const now = serverTimestamp();
-  const adminUid = currentUid();
-  await updateDoc(doc(db, "users", targetUid), { status: "blocked", updatedAt: now });
-  await addDoc(collection(db, "auditLogs"), {
-    actorUid: adminUid, actorRole: "moderator", action: "accountBlocked",
-    targetUid, targetEntityType: "user", targetEntityId: targetUid,
-    previousValue: null, newValue: { status: "blocked" }, reason, ipAddress: null, createdAt: now,
-  }).catch(() => {});
+ await httpsCallable(fns(), "blockAccount")({ targetUid, reason });
 }
 
 export async function callUnblockAccount(targetUid: string): Promise<void> {
-  if (!db) throw new Error("Firebase not configured");
-  try {
-    const fn = httpsCallable(fns(), "unblockAccount");
-    await fn({ targetUid });
-    return;
-  } catch { /* fall through */ }
-
-  const now = serverTimestamp();
-  const adminUid = currentUid();
-  await updateDoc(doc(db, "users", targetUid), { status: "approved", updatedAt: now });
-  await addDoc(collection(db, "auditLogs"), {
-    actorUid: adminUid, actorRole: "moderator", action: "accountUnblocked",
-    targetUid, targetEntityType: "user", targetEntityId: targetUid,
-    previousValue: null, newValue: { status: "approved" }, reason: null, ipAddress: null, createdAt: now,
-  }).catch(() => {});
+ await httpsCallable(fns(), "unblockAccount")({ targetUid });
 }
 
 export async function callSuspendAccount(targetUid: string, reason: string, durationDays?: number): Promise<void> {
-  if (!db) throw new Error("Firebase not configured");
-  try {
-    const fn = httpsCallable(fns(), "suspendAccount");
-    await fn({ targetUid, reason, durationDays });
-    return;
-  } catch { /* fall through */ }
-
-  const now = serverTimestamp();
-  const adminUid = currentUid();
-  await updateDoc(doc(db, "users", targetUid), { status: "suspended", updatedAt: now });
-  await addDoc(collection(db, "auditLogs"), {
-    actorUid: adminUid, actorRole: "moderator", action: "accountSuspended",
-    targetUid, targetEntityType: "user", targetEntityId: targetUid,
-    previousValue: null, newValue: { status: "suspended", durationDays: durationDays ?? null }, reason, ipAddress: null, createdAt: now,
-  }).catch(() => {});
+ await httpsCallable(fns(), "suspendAccount")({ targetUid, reason, ...(durationDays ? { durationDays } : {}) });
 }
 
 export async function callDeleteCloudinaryAsset(deletionRequestId: string): Promise<void> {
-  if (!db) throw new Error("Firebase not configured");
-  try {
-    const fn = httpsCallable(fns(), "deleteCloudinaryAsset");
-    await fn({ deletionRequestId });
-    return;
-  } catch {
-    // Cloud Function not available — just mark as failed with a note
-    await updateDoc(doc(db, "deletionRequests", deletionRequestId), {
-      status: "failed",
-      adminNote: "Cloud Functions not deployed. Manual Cloudinary deletion required.",
-      updatedAt: serverTimestamp(),
-    }).catch(() => {});
-    throw new Error("Cloud Functions not deployed. Mark deletion as requiring manual action.");
-  }
+ await httpsCallable(fns(), "deleteCloudinaryAsset")({ deletionRequestId });
 }
 
 // ─────────────────────────────────────────────
@@ -386,7 +238,7 @@ export function subscribeToDeletionRequests(
   if (!db) return () => {};
   const q = query(
     collection(db, "deletionRequests"),
-    where("status", "==", "pending"),
+    where("status", "in", ["pending", "approved", "failed"]),
     orderBy("createdAt", "desc"),
     limit(pageSize)
   );
@@ -452,4 +304,11 @@ export interface AuditLogRow {
   targetEntityId: string | null;
   reason: string | null;
   createdAt: Date;
+}
+
+export async function callHandleReport(reportId: string, action: "actioned" | "dismissed") {
+ await httpsCallable(fns(), "handleReport")({ reportId, action });
+}
+export async function callProcessDeletion(requestId: string, decision: "approved" | "rejected") {
+ await httpsCallable(fns(), "processDeletionRequest")({ requestId, decision });
 }

@@ -39,6 +39,7 @@ const NOTIF_ICONS: Record<NotificationType, React.ElementType> = {
   comment: MessageCircle,
   follow: UserPlus,
   followRequest: UserPlus,
+  followAccepted: UserPlus,
   storyReply: MessageCircle,
   message: MessageCircle,
   albumInvite: BookImage,
@@ -51,6 +52,7 @@ const NOTIF_ICON_COLORS: Record<NotificationType, string> = {
   comment: "text-blue-400 bg-blue-500/10",
   follow: "text-green-400 bg-green-500/10",
   followRequest: "text-yellow-400 bg-yellow-500/10",
+  followAccepted: "text-green-400 bg-green-500/10",
   storyReply: "text-purple-400 bg-purple-500/10",
   message: "text-accent bg-accent/10",
   albumInvite: "text-orange-400 bg-orange-500/10",
@@ -59,10 +61,13 @@ const NOTIF_ICON_COLORS: Record<NotificationType, string> = {
 };
 
 function getEntityLink(type: NotificationType, entityType: string, entityId: string, senderUsername: string): string {
-  if (type === "like" || type === "comment") return `/@${senderUsername}`;
-  if (type === "follow" || type === "followRequest") return `/@${senderUsername}`;
+  if (type === "like" || type === "comment") return `/post/${entityId}`;
+  if (type === "followRequest") return "/settings/follow-requests";
+  if (type === "followAccepted") return `/@${senderUsername}`;
+  if (type === "follow") return `/@${senderUsername}`;
   if (type === "albumInvite") return `/albums`;
   if (type === "message") return `/messages`;
+  if (type === "adminAction" || type === "deletionUpdate") return "/settings/account";
   return `/@${senderUsername}`;
 }
 

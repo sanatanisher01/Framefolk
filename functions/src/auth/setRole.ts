@@ -1,3 +1,4 @@
+import { requirePermission } from "../lib/security";
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 
@@ -34,7 +35,9 @@ export const setRole = functions.https.onCall(
       );
     }
 
+    await requirePermission(context, "canAssignRoles");
     const { targetUid, role, permissions } = data;
+    if (!["superAdmin", "moderator", "user"].includes(role)) throw new functions.https.HttpsError("invalid-argument", "Invalid role.");
 
     if (!targetUid || !role) {
       throw new functions.https.HttpsError("invalid-argument", "targetUid and role required.");
@@ -62,7 +65,8 @@ export const setRole = functions.https.onCall(
       }
 
       // Set custom claim
-      await auth.setCustomUserClaims(targetUid, { role });
+      const target = await auth.getUser(targetUid);
+      await auth.setCustomUserClaims(targetUid, { ...target.customClaims, role });
 
       // Update roles collection
       await db.collection("roles").doc(targetUid).set(

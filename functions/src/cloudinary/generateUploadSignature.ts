@@ -43,11 +43,12 @@ export const generateUploadSignature = functions.https.onCall(
       throw new functions.https.HttpsError("internal", "Cloudinary not configured.");
     }
 
+    if (!["post", "profile", "story", "cover"].includes(data.context) || !["image", "video"].includes(data.resourceType)) throw new functions.https.HttpsError("invalid-argument", "Invalid upload request.");
     const folder = `framefolk/users/${uid}/${data.context === "profile" || data.context === "cover" ? "profile" : data.context}`;
     const timestamp = Math.round(Date.now() / 1000);
 
     const params: Record<string, string | number> = { folder, timestamp };
-    if (data.isPrivate) params.type = "private";
+    params.type = data.context === "profile" || data.context === "cover" ? "upload" : "authenticated";
 
     const stringToSign = Object.keys(params).sort()
       .map((k) => `${k}=${params[k]}`)
@@ -57,6 +58,6 @@ export const generateUploadSignature = functions.https.onCall(
       .update(stringToSign + apiSecret)
       .digest("hex");
 
-    return { signature, apiKey, cloudName, timestamp, folder };
+    return { signature, apiKey, cloudName, timestamp, folder, type: params.type, accountId: "central" };
   }
 );

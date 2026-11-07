@@ -12,6 +12,7 @@ import { PostSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
 import { Home } from "lucide-react";
+import { platformRequest } from "@/services/platform.service";
 import type { Post, Media } from "@/types";
 
 interface Props {
@@ -24,11 +25,12 @@ interface Props {
 const PAGE_SIZE = 10;
 
 export function FeedList({ currentUid, currentUsername, currentPhotoUrl, followingUids }: Props) {
+  const [error, setError] = useState<string | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const [mediaMap, setMediaMap] = useState<Record<string, Partial<Media>[]>>({});
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [cursor, setCursor] = useState<QueryDocumentSnapshot | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
@@ -51,44 +53,14 @@ export function FeedList({ currentUid, currentUsername, currentPhotoUrl, followi
     setMediaMap((prev) => ({ ...prev, ...updates }));
   }
 
-  const loadPosts = useCallback(async (afterCursor?: QueryDocumentSnapshot) => {
+  const loadPosts = useCallback(async (afterCursor?: string) => {
     if (!db || followingUids.length === 0) {
       setLoading(false);
       return;
     }
 
-    // Firestore "in" supports max 30 values
-    const uids = followingUids.slice(0, 30);
-
-    // NOTE: Firestore does NOT support `where IN` + `where ==` + `orderBy` in a single
-    // compound query — it fails at runtime without a very specific index.
-    // We fetch by authorUid IN + orderBy, then filter isHidden client-side.
-    let q = query(
-      collection(db, "posts"),
-      where("authorUid", "in", uids),
-      orderBy("createdAt", "desc"),
-      limit((PAGE_SIZE + 1) * 2) // over-fetch to account for hidden posts filtered out
-    );
-    if (afterCursor) q = query(q, startAfter(afterCursor));
-
-    const snap = await getDocs(q);
-
-    // Filter hidden posts client-side
-    const visible = snap.docs.filter((d) => d.data().isHidden !== true);
-    const more = visible.length > PAGE_SIZE;
-    const docs = visible.slice(0, PAGE_SIZE);
-
-    const newPosts = docs.map((d) => {
-      const data = d.data();
-      return {
-        id: d.id,
-        ...data,
-        createdAt: data.createdAt?.toDate?.() ?? new Date(),
-        updatedAt: data.updatedAt?.toDate?.() ?? new Date(),
-        publishedAt: data.publishedAt?.toDate?.() ?? null,
-        scheduledFor: data.scheduledFor?.toDate?.() ?? null,
-      } as Post;
-    });
+    const page = await platformRequest<{ posts: Post[]; cursor: string | null }>("posts", { mode: "feed", cursor: afterCursor, pageSize: PAGE_SIZE });
+    const newPosts = page.posts;
 
     if (afterCursor) {
       setPosts((prev) => [...prev, ...newPosts]);
@@ -96,17 +68,15 @@ export function FeedList({ currentUid, currentUsername, currentPhotoUrl, followi
       setPosts(newPosts);
     }
 
-    // Use the last raw snap doc as cursor (not the filtered one) to avoid skipping docs
-    const lastDoc = snap.docs[snap.docs.length - 1] ?? null;
-    setHasMore(more || snap.docs.length >= (PAGE_SIZE + 1) * 2);
-    setCursor(lastDoc);
+    setHasMore(!!page.cursor);
+    setCursor(page.cursor);
     await loadMediaForPosts(newPosts);
   }, [followingUids]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Initial load
   useEffect(() => {
     setLoading(true);
-    loadPosts().finally(() => setLoading(false));
+    loadPosts().catch(error => { console.error(error); setError("Could not load your feed. Please retry."); }).finally(() => setLoading(false));
   }, [loadPosts]);
 
   // Intersection observer for infinite scroll
@@ -125,7 +95,9 @@ export function FeedList({ currentUid, currentUsername, currentPhotoUrl, followi
     );
     obs.observe(el);
     return () => obs.disconnect();
-  }, [hasMore, loadingMore, cursor, loadPosts]);
+  }, [loading, hasMore, loadingMore, cursor, loadPosts]);
+
+  if (error) return <EmptyState title={error} actionLabel="Retry" onAction={() => { setError(null); setLoading(true); loadPosts().catch(() => setError("Could not load your feed. Please retry.")).finally(() => setLoading(false)); }} />;
 
   if (loading) {
     return (
@@ -152,6 +124,8 @@ export function FeedList({ currentUid, currentUsername, currentPhotoUrl, followi
       <EmptyState
         icon={Home}
         title="Nothing new yet"
+        actionLabel={cursor ? "Check older posts" : undefined}
+        onAction={cursor ? () => { loadPosts(cursor).catch(() => setError("Could not load older posts.")); } : undefined}
         description="The people you follow haven't posted recently."
       />
     );

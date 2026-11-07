@@ -32,6 +32,7 @@ interface Props {
 }
 
 export function ChatWindow({ conversationId, currentUid, onBack }: Props) {
+  const [pageSize, setPageSize] = useState(50);
   const [messages, setMessages] = useState<Message[]>([]);
   const [partner, setPartner] = useState<Partner | null>(null);
   const [loading, setLoading] = useState(true);
@@ -53,19 +54,28 @@ export function ChatWindow({ conversationId, currentUid, onBack }: Props) {
     setLoading(true);
     const unsub = subscribeToMessages(conversationId, (msgs) => {
       setMessages(msgs);
+      if (document.visibilityState === "visible" && msgs.some(m => m.senderUid !== currentUid && !m.isRead)) markMessagesRead(conversationId, currentUid).catch(() => {});
       setLoading(false); // fires even with 0 messages
-    });
+    }, pageSize);
     // Mark as read
     markMessagesRead(conversationId, currentUid).catch(() => {});
     // Safety timeout — if no snapshot in 3s, stop spinning
     const timeout = setTimeout(() => setLoading(false), 3000);
     return () => { unsub(); clearTimeout(timeout); };
-  }, [conversationId, currentUid]);
+  }, [conversationId, currentUid, pageSize]);
 
-  // Auto-scroll to bottom
+  const lastVisibleId = useRef<string | undefined>();
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const id = messages[messages.length - 1]?.id;
+    if (id && id !== lastVisibleId.current) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    lastVisibleId.current = id;
   }, [messages]);
+  useEffect(() => {
+    const visible = () => { if (document.visibilityState === "visible") markMessagesRead(conversationId, currentUid).catch(() => {}); };
+    document.addEventListener("visibilitychange", visible);
+    return () => { document.removeEventListener("visibilitychange", visible); setTyping(conversationId, currentUid, false).catch(() => {}); };
+  }, [conversationId, currentUid]);
+  useEffect(() => () => { if (typingTimeout) clearTimeout(typingTimeout); }, [typingTimeout]);
 
   const handleTyping = useCallback(() => {
     setTyping(conversationId, currentUid, true).catch(() => {});
@@ -149,10 +159,10 @@ export function ChatWindow({ conversationId, currentUid, onBack }: Props) {
         ) : (
           <div className="flex-1 h-8 bg-bg-secondary rounded animate-skeleton" />
         )}
-        <button type="button" className="p-1.5 rounded-lg hover:bg-bg-card transition-colors" aria-label="More">
-          <MoreHorizontal className="h-5 w-5 text-text-secondary" />
-        </button>
+        {partner && <Link href={`/@${partner.username}`} className="p-1.5 rounded-lg hover:bg-bg-card transition-colors" aria-label="View profile"><MoreHorizontal className="h-5 w-5 text-text-secondary" /></Link>}
       </div>
+
+      {messages.length >= pageSize && <button type="button" className="text-xs text-accent py-2" onClick={() => setPageSize(n => n + 50)}>Load older messages</button>}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-1 no-scrollbar">

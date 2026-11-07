@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { AlertCircle, CheckCircle } from "lucide-react";
@@ -45,9 +45,11 @@ export function EditProfilePage() {
     },
   });
 
-  // Re-populate when user loads
+  const hydratedUid = useRef<string | null>(null);
+  // Populate once per account; later snapshots must preserve edits.
   useEffect(() => {
-    if (user) {
+    if (user && hydratedUid.current !== user.uid) {
+      hydratedUid.current = user.uid;
       reset({
         displayName: user.displayName ?? "",
         username: user.username ?? "",

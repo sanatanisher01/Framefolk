@@ -3,12 +3,13 @@
  * Create, read, view and expire stories.
  */
 "use client";
+import { platformRequest, poll } from "./platform.service";
 
 import {
   collection, doc, setDoc, getDoc, getDocs,
   query, where, orderBy, limit, updateDoc,
   serverTimestamp, Timestamp, onSnapshot,
-  type Unsubscribe,
+  writeBatch, type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import type { Story, StoryView, PostVisibility } from "@/types";
@@ -30,11 +31,14 @@ export interface CreateStoryPayload {
   textContent?: string;
   textStyle?: { color: string; fontSize: number; fontFamily: string; background: string };
   caption?: string;
+  onProgress?: (percent: number) => void;
+  customAudienceUids?: string[];
 }
 
 export async function createStory(payload: CreateStoryPayload): Promise<string> {
   if (!db) throw new Error("Firebase not configured");
 
+  const batch = writeBatch(db);
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // +24h
   const storyRef = doc(collection(db, "stories"));
   const storyId = storyRef.id;
@@ -45,6 +49,7 @@ export async function createStory(payload: CreateStoryPayload): Promise<string> 
   // Upload media if present
   if ((payload.type === "photo" || payload.type === "video") && payload.file) {
     const result = await uploadFile(payload.file, {
+      onProgress: payload.onProgress,
       context: "story",
       isPrivate: payload.visibility !== "public",
     });
@@ -54,14 +59,16 @@ export async function createStory(payload: CreateStoryPayload): Promise<string> 
     mediaId = mediaRef.id;
     cloudinaryPublicId = result.publicId;
 
-    await setDoc(mediaRef, {
+    batch.set(mediaRef, {
       id: mediaRef.id,
       ownerUid: payload.authorUid,
       postId: null,
       storyId,
       albumId: null,
-      storageProvider: "central",
-      cloudinaryAccountId: "central",
+      storageProvider: result.accountId && result.accountId !== "central" ? "personal" : "central",
+      cloudinaryAccountId: result.accountId ?? "central",
+      cloudName: result.cloudName ?? process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME,
+      deliveryType: result.deliveryType ?? "upload",
       cloudinaryPublicId: result.publicId,
       assetId: result.assetId,
       resourceType: result.resourceType,
@@ -80,7 +87,7 @@ export async function createStory(payload: CreateStoryPayload): Promise<string> 
     });
   }
 
-  await setDoc(storyRef, {
+  batch.set(storyRef, {
     id: storyId,
     authorUid: payload.authorUid,
     authorUsername: payload.authorUsername,
@@ -92,7 +99,7 @@ export async function createStory(payload: CreateStoryPayload): Promise<string> 
     textStyle: payload.textStyle ?? null,
     caption: payload.caption ?? null,
     visibility: payload.visibility,
-    customAudienceUids: [],
+    customAudienceUids: payload.customAudienceUids ?? [],
     viewsCount: 0,
     reactionsCount: 0,
     expiresAt: Timestamp.fromDate(expiresAt),
@@ -102,6 +109,7 @@ export async function createStory(payload: CreateStoryPayload): Promise<string> 
     updatedAt: serverTimestamp(),
   });
 
+  await batch.commit();
   return storyId;
 }
 
@@ -117,113 +125,21 @@ export interface StoryAuthorGroup {
   hasUnviewed: boolean;
 }
 
-export async function loadStoriesGrouped(
-  currentUid: string
-): Promise<StoryAuthorGroup[]> {
-  if (!db) return [];
-
-  const now = new Date();
-
-  // Single query — just filter by expiresAt to use the existing index.
-  // Filter isExpired/isDeleted client-side to avoid needing a 3-field composite index.
-  const q = query(
-    collection(db, "stories"),
-    where("expiresAt", ">", Timestamp.fromDate(now)),
-    orderBy("expiresAt"),
-    limit(150)
-  );
-
-  // Own stories query — simple single-field filter
-  const ownQ = query(
-    collection(db, "stories"),
-    where("authorUid", "==", currentUid),
-    orderBy("createdAt", "desc"),
-    limit(20)
-  );
-
-  const [snap, ownSnap] = await Promise.all([getDocs(q), getDocs(ownQ)]);
-  const groups = new Map<string, StoryAuthorGroup>();
-
-  // Process own stories first — filter expired/deleted client-side
-  for (const d of ownSnap.docs) {
-    const data = d.data();
-    if (data.isDeleted === true) continue;
-    const uid = data.authorUid as string;
-    const story = {
-      id: d.id,
-      ...data,
-      expiresAt: data.expiresAt?.toDate() ?? new Date(),
-      createdAt: data.createdAt?.toDate() ?? new Date(),
-      updatedAt: data.updatedAt?.toDate() ?? new Date(),
-    } as Story;
-
-    if (!groups.has(uid)) {
-      groups.set(uid, {
-        authorUid: uid,
-        authorUsername: (data.authorUsername as string) ?? "",
-        authorPhotoUrl: (data.authorPhotoUrl as string) ?? "",
-        stories: [],
-        hasUnviewed: false,
-      });
-    }
-    const group = groups.get(uid)!;
-    if (!group.stories.find((s) => s.id === story.id)) {
-      group.stories.push(story);
-    }
-  }
-
-  // Process all non-expired stories — filter deleted client-side
-  for (const d of snap.docs) {
-    const data = d.data();
-    if (data.isDeleted === true) continue;
-    const uid = data.authorUid as string;
-    const story = {
-      id: d.id,
-      ...data,
-      expiresAt: data.expiresAt?.toDate() ?? new Date(),
-      createdAt: data.createdAt?.toDate() ?? new Date(),
-      updatedAt: data.updatedAt?.toDate() ?? new Date(),
-    } as Story;
-
-    if (!groups.has(uid)) {
-      groups.set(uid, {
-        authorUid: uid,
-        authorUsername: (data.authorUsername as string) ?? "",
-        authorPhotoUrl: (data.authorPhotoUrl as string) ?? "",
-        stories: [],
-        hasUnviewed: false,
-      });
-    }
-    const group = groups.get(uid)!;
-    if (!group.stories.find((s) => s.id === story.id)) {
-      group.stories.push(story);
-    }
-  }
-
-  // Check which stories current user has viewed
-  if (groups.size > 0) {
-    const viewedQuery = query(
-      collection(db, "storyViews"),
-      where("viewerUid", "==", currentUid),
-      limit(200)
-    );
-    const viewedSnap = await getDocs(viewedQuery);
-    const viewedStoryIds = new Set(viewedSnap.docs.map((d) => d.data().storyId as string));
-
-    for (const group of groups.values()) {
-      group.hasUnviewed = group.stories.some((s) => !viewedStoryIds.has(s.id));
-    }
-  }
-
-  // Own stories always first, then by unviewed
-  const result = Array.from(groups.values());
-  result.sort((a, b) => {
-    if (a.authorUid === currentUid) return -1;
-    if (b.authorUid === currentUid) return 1;
-    return b.hasUnviewed ? 1 : -1;
-  });
-
-  return result;
+export async function loadStoriesGrouped(currentUid: string): Promise<StoryAuthorGroup[]> {
+ const stories = await platformRequest<Story[]>("stories");
+ const groups = new Map<string, StoryAuthorGroup>();
+ for (const story of stories) {
+  let group = groups.get(story.authorUid);
+  if (!group) { group = { authorUid: story.authorUid, authorUsername: story.authorUsername, authorPhotoUrl: story.authorPhotoUrl, stories: [], hasUnviewed: false }; groups.set(story.authorUid, group); }
+  group.stories.push(story);
+ }
+ // Read exact active-story view IDs, so historical views cannot displace current ones.
+ await Promise.all(Array.from(groups.values()).map(async group => {
+  const views = await Promise.all(group.stories.map(story => getDoc(doc(db, "storyViews", `${story.id}_${currentUid}`)).catch(() => null)));
+  group.hasUnviewed = views.some(view => !view?.exists());
+  group.stories.sort((a,b) => a.createdAt.getTime() - b.createdAt.getTime());
+ }));
+ return Array.from(groups.values()).sort((a,b) => Number(b.authorUid === currentUid) - Number(a.authorUid === currentUid) || Number(b.hasUnviewed) - Number(a.hasUnviewed));
 }
 
 // ─────────────────────────────────────────────
@@ -231,74 +147,23 @@ export async function loadStoriesGrouped(
 // ─────────────────────────────────────────────
 
 export async function loadUserStories(authorUid: string): Promise<Story[]> {
-  if (!db) return [];
-  const now = new Date();
-  const q = query(
-    collection(db, "stories"),
-    where("authorUid", "==", authorUid),
-    where("isExpired", "==", false),
-    where("isDeleted", "==", false),
-    where("expiresAt", ">", Timestamp.fromDate(now)),
-    orderBy("expiresAt"),
-    limit(20)
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({
-    id: d.id,
-    ...d.data(),
-    expiresAt: d.data().expiresAt?.toDate() ?? new Date(),
-    createdAt: d.data().createdAt?.toDate() ?? new Date(),
-    updatedAt: d.data().updatedAt?.toDate() ?? new Date(),
-  } as Story));
+ return platformRequest<Story[]>("stories", { authorUid });
 }
 
 // ─────────────────────────────────────────────
 // Mark a story as viewed
 // ─────────────────────────────────────────────
 
-export async function markStoryViewed(
-  storyId: string,
-  viewerUid: string
-): Promise<void> {
-  if (!db) return;
-
-  const viewId = `${storyId}_${viewerUid}`;
-  const viewRef = doc(db, "storyViews", viewId);
-  const existing = await getDoc(viewRef);
-  if (existing.exists()) return; // already viewed
-
-  await setDoc(viewRef, {
-    storyId,
-    viewerUid,
-    reaction: null,
-    reply: null,
-    viewedAt: serverTimestamp(),
-  });
-
-  await updateDoc(doc(db, "stories", storyId), {
-    viewsCount: ((await getDoc(doc(db, "stories", storyId))).data()?.viewsCount ?? 0) + 1,
-  });
+export async function markStoryViewed(storyId: string, viewerUid: string): Promise<void> {
+ await platformRequest("viewStory", { storyId });
 }
 
 // ─────────────────────────────────────────────
 // React to a story
 // ─────────────────────────────────────────────
 
-export async function reactToStory(
-  storyId: string,
-  viewerUid: string,
-  reaction: string
-): Promise<void> {
-  if (!db) return;
-  const viewId = `${storyId}_${viewerUid}`;
-  await setDoc(
-    doc(db, "storyViews", viewId),
-    { reaction, viewedAt: serverTimestamp() },
-    { merge: true }
-  );
-  await updateDoc(doc(db, "stories", storyId), {
-    reactionsCount: ((await getDoc(doc(db, "stories", storyId))).data()?.reactionsCount ?? 0) + 1,
-  });
+export async function reactToStory(storyId: string, viewerUid: string, reaction: string): Promise<void> {
+ await platformRequest("reactStory", { storyId, reaction });
 }
 
 // ─────────────────────────────────────────────
@@ -325,27 +190,6 @@ export async function getStoryViewers(storyId: string): Promise<StoryView[]> {
 // Subscribe to own stories (for highlights)
 // ─────────────────────────────────────────────
 
-export function subscribeToMyStories(
-  uid: string,
-  callback: (stories: Story[]) => void
-): Unsubscribe {
-  if (!db) return () => {};
-  const now = new Date();
-  const q = query(
-    collection(db, "stories"),
-    where("authorUid", "==", uid),
-    where("isExpired", "==", false),
-    where("expiresAt", ">", Timestamp.fromDate(now)),
-    orderBy("expiresAt"),
-    limit(20)
-  );
-  return onSnapshot(q, (snap) => {
-    callback(snap.docs.map((d) => ({
-      id: d.id,
-      ...d.data(),
-      expiresAt: d.data().expiresAt?.toDate() ?? new Date(),
-      createdAt: d.data().createdAt?.toDate() ?? new Date(),
-      updatedAt: d.data().updatedAt?.toDate() ?? new Date(),
-    } as Story)));
-  });
+export function subscribeToMyStories(uid: string, callback: (stories: Story[]) => void): Unsubscribe {
+ return poll(() => loadUserStories(uid), callback, () => callback([]));
 }

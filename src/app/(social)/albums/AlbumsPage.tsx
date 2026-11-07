@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Plus, BookImage, Users, Lock, UserCheck, UserX } from "lucide-react";
 import { motion } from "framer-motion";
+import { getUserDoc } from "@/services/auth.service";
+import { platformRequest } from "@/services/platform.service";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { subscribeToMyAlbums, createAlbum, respondToAlbumInvite } from "@/services/album.service";
 import {
@@ -72,8 +74,8 @@ export function AlbumsPage() {
         try {
           const albumSnap = await getDoc(doc(db!, "albums", data.albumId as string));
           if (albumSnap.exists()) albumTitle = (albumSnap.data().title as string) ?? "Album";
-          const inviterSnap = await getDoc(doc(db!, "users", data.invitedBy as string));
-          if (inviterSnap.exists()) inviterUsername = (inviterSnap.data().username as string) ?? "";
+          const inviter = await getUserDoc(data.invitedBy as string);
+          inviterUsername = (inviter?.username as string) ?? "";
         } catch { /* ignore */ }
         invites.push({ id: d.id, albumId: data.albumId as string, albumTitle, inviterUsername, role: (data.role as string) ?? "viewer" });
       }

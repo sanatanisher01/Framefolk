@@ -15,6 +15,9 @@ import type { UploadSignature } from "@/lib/cloudinary";
 export type UploadContext = "post" | "profile" | "cover" | "story";
 
 export interface CloudinaryUploadResult {
+  cloudName?: string;
+  accountId?: string;
+  deliveryType?: string;
   publicId: string;
   assetId: string;
   secureUrl: string;
@@ -109,7 +112,9 @@ export async function uploadFile(
 
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
-        const data = JSON.parse(xhr.responseText);
+        let data;
+        try { data = JSON.parse(xhr.responseText); } catch { reject(new Error("Invalid upload response.")); return; }
+        if (!data.public_id || !data.asset_id || !data.secure_url) { reject(new Error("Incomplete upload response.")); return; }
         const isVideo = resourceType === "video";
 
         const deliveryUrl = isVideo
@@ -117,6 +122,7 @@ export async function uploadFile(
           : buildImageUrl(data.public_id, sig.cloudName, { width: 1080 });
 
         resolve({
+          cloudName: sig.cloudName, accountId: sig.accountId ?? "central", deliveryType: sig.type ?? "upload",
           publicId: data.public_id as string,
           assetId: data.asset_id as string,
           secureUrl: data.secure_url as string,
@@ -141,6 +147,8 @@ export async function uploadFile(
       }
     };
 
+    xhr.timeout = 15 * 60 * 1000;
+    xhr.ontimeout = () => reject(new Error("Upload timed out. Please retry."));
     xhr.onerror = () => reject(new Error("Network error during upload"));
     xhr.onabort = () => reject(new Error("Upload cancelled"));
 
@@ -188,7 +196,7 @@ export async function uploadFiles(
 // Get a signed delivery URL for private media
 // ─────────────────────────────────────────────
 
-export async function getSignedDeliveryUrl(mediaId: string): Promise<string> {
+export async function getSignedDeliveryUrl(mediaId: string, thumbnail = false): Promise<string> {
   const idToken = await getIdToken();
 
   const res = await fetch("/api/cloudinary/signed-url", {
@@ -197,7 +205,7 @@ export async function getSignedDeliveryUrl(mediaId: string): Promise<string> {
       "Content-Type": "application/json",
       Authorization: `Bearer ${idToken}`,
     },
-    body: JSON.stringify({ mediaId }),
+    body: JSON.stringify({ mediaId, thumbnail }),
   });
 
   if (!res.ok) throw new Error("Failed to get signed URL");

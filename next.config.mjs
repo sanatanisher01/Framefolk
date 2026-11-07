@@ -1,7 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   images: {
     remotePatterns: [
+      { protocol: "https", hostname: "api.cloudinary.com" },
       // Google profile photos (Google Sign-In)
       {
         protocol: "https",

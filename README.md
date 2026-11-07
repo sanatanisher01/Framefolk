@@ -1,3 +1,5 @@
+> Current fixes, verification commands, and live rollout requirements: [BUGFIX_VALIDATION.md](docs/BUGFIX_VALIDATION.md). The original phase plan below is historical.
+
 # FRAMEFOLK
 
 > Every frame has a story.
@@ -151,7 +153,7 @@ framefolk/
 - Cloudinary API secrets are server-side only; signatures are generated in Cloud Functions.
 - Private media uses short-lived signed Cloudinary URLs — never exposed public_id links.
 - Admin roles are enforced via Firebase custom claims, not Firestore fields.
-- User Cloudinary credentials (Mode B) are stored in Firebase Secret Manager only.
+- Personal Cloudinary secrets are encrypted with AES-256-GCM in a server-only Firestore collection; configure a stable encryption key.
 
 See `docs/SECURITY.md` for the full security architecture.
 
@@ -164,7 +166,7 @@ npm run dev          # Start development server (http://localhost:3000)
 npm run build        # Production build
 npm run start        # Start production server
 npm run lint         # ESLint
-npm run type-check   # TypeScript type check only (tsc --noEmit)
+npm run typecheck   # TypeScript type check only (tsc --noEmit)
 ```
 
 ---

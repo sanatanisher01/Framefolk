@@ -14,10 +14,11 @@ export interface SignatureParams {
   /** Optional eager transformation string (e.g. thumbnail generation) */
   eager?: string;
   /** "private" restricts delivery to signed URLs */
-  type?: "upload" | "private";
+  type?: "upload" | "private" | "authenticated";
 }
 
 export interface UploadSignature {
+  accountId?: string;
   signature: string;
   apiKey: string;
   cloudName: string;

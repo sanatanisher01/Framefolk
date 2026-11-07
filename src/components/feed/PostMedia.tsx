@@ -4,7 +4,7 @@ import { useState, useRef } from "react";
 import Image from "next/image";
 import { ChevronLeft, ChevronRight, Play, Volume2, VolumeX } from "lucide-react";
 import { cn } from "@/utils/cn";
-import { buildImageUrl } from "@/lib/cloudinary/config";
+import { useMediaDelivery } from "@/hooks/useMediaDelivery";
 import type { Media } from "@/types";
 
 interface Props {
@@ -18,7 +18,7 @@ export function PostMedia({ mediaItems, className }: Props) {
 
   if (mediaItems.length === 0) return null;
 
-  const current = mediaItems[index];
+  const current = mediaItems[Math.min(index, mediaItems.length - 1)];
   const isVideo = current?.resourceType === "video";
 
   return (
@@ -76,7 +76,8 @@ export function PostMedia({ mediaItems, className }: Props) {
 }
 
 function ImageItem({ item, cloudName }: { item: Partial<Media>; cloudName: string }) {
-  if (!item.cloudinaryPublicId) {
+  const url = useMediaDelivery(item.id);
+  if (!url) {
     return (
       <div className="aspect-square bg-bg-secondary flex items-center justify-center">
         <span className="text-text-muted text-sm">No preview</span>
@@ -84,10 +85,10 @@ function ImageItem({ item, cloudName }: { item: Partial<Media>; cloudName: strin
     );
   }
 
-  const url = buildImageUrl(item.cloudinaryPublicId, cloudName, { width: 800 });
   return (
     <div className="relative w-full" style={{ aspectRatio: getAspectRatio(item) }}>
       <Image
+        unoptimized
         src={url}
         alt="Post image"
         fill
@@ -104,17 +105,8 @@ function VideoPlayer({ item, cloudName }: { item: Partial<Media>; cloudName: str
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(true);
 
-  // Build Cloudinary video URL
-  const publicId = item.cloudinaryPublicId ?? "";
-  // Cloudinary video delivery URL
-  const videoUrl = publicId
-    ? `https://res.cloudinary.com/${cloudName}/video/upload/q_auto,f_auto/${publicId}`
-    : (item as Record<string, unknown>).deliveryUrl as string ?? "";
-
-  // Thumbnail for poster
-  const posterUrl = publicId
-    ? `https://res.cloudinary.com/${cloudName}/video/upload/so_auto,w_800,f_jpg,q_auto/${publicId}`
-    : "";
+  const videoUrl = useMediaDelivery(item.id);
+  const posterUrl = useMediaDelivery(item.id, true);
 
   function togglePlay() {
     const v = videoRef.current;

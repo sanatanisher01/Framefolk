@@ -6,7 +6,7 @@ import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { useAuth } from "@/lib/auth/AuthContext";
 import {
-  subscribeToDeletionRequests, callDeleteCloudinaryAsset,
+  subscribeToDeletionRequests, callDeleteCloudinaryAsset, callProcessDeletion,
   type AdminDeletionRequest,
 } from "@/services/admin.service";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
@@ -36,12 +36,8 @@ export default function DeletionRequestsPage() {
     if (!db || !firebaseUser) return;
     setBusy(req.id);
     try {
-      // Update status to approved (moderator rule now allows this)
-      await updateDoc(doc(db, "deletionRequests", req.id), {
-        status: "approved",
-        adminUid: firebaseUser.uid,
-        updatedAt: serverTimestamp(),
-      });
+      // Validate and approve through the administrative callable.
+      await callProcessDeletion(req.id, "approved");
       // Then call the Cloud Function to execute the Cloudinary deletion
       await callDeleteCloudinaryAsset(req.id);
       toast({ title: "Deletion completed", description: "Media removed from Cloudinary.", variant: "success" });
@@ -56,11 +52,7 @@ export default function DeletionRequestsPage() {
     if (!db || !firebaseUser) return;
     setBusy(req.id);
     try {
-      await updateDoc(doc(db, "deletionRequests", req.id), {
-        status: "rejected",
-        adminUid: firebaseUser.uid,
-        updatedAt: serverTimestamp(),
-      });
+      await callProcessDeletion(req.id, "rejected");
       toast({ title: "Deletion request rejected", variant: "default" });
     } catch (err: unknown) {
       toast({ title: "Failed to update", description: (err as Error).message, variant: "error" });

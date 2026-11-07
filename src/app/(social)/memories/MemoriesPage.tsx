@@ -16,6 +16,8 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { buildImageUrl, buildVideoThumbnail } from "@/lib/cloudinary/config";
 import { Clock, CalendarDays, Calendar, Sparkles, Play } from "lucide-react";
+import { platformRequest } from "@/services/platform.service";
+import { getSignedDeliveryUrl } from "@/services/upload.service";
 import type { Post, Media } from "@/types";
 
 const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME ?? "";
@@ -35,34 +37,16 @@ interface YearGroup { label: string; year: number; posts: PostWithThumb[] }
 // ─────────────────────────────────────────────────────────────────
 
 async function fetchThumb(post: Post): Promise<string> {
-  if (!db || !post.coverMediaId) return "";
-  try {
-    const snap = await getDoc(doc(db, "media", post.coverMediaId));
-    if (!snap.exists()) return "";
-    const m = snap.data() as Partial<Media>;
-    const pid = m.cloudinaryPublicId ?? "";
-    return m.resourceType === "video"
-      ? buildVideoThumbnail(pid, CLOUD_NAME)
-      : buildImageUrl(pid, CLOUD_NAME, { width: 300 });
-  } catch { return ""; }
+  return post.coverMediaId ? getSignedDeliveryUrl(post.coverMediaId, true).catch(() => "") : "";
 }
 
 async function loadMyPosts(uid: string, pageSize = 200): Promise<PostWithThumb[]> {
-  if (!db) return [];
-  const q = query(
-    collection(db, "posts"),
-    where("authorUid", "==", uid),
-    where("isHidden", "==", false),
-    orderBy("createdAt", "desc"),
-    limit(pageSize)
-  );
-  const snap = await getDocs(q);
-  const posts: Post[] = snap.docs.map((d) => ({
-    id: d.id,
-    ...d.data(),
-    createdAt: d.data().createdAt?.toDate?.() ?? new Date(),
-    updatedAt: d.data().updatedAt?.toDate?.() ?? new Date(),
-  } as Post));
+  const posts: Post[] = [];
+  let cursor: string | null = null;
+  do {
+    const page: { posts: Post[]; cursor: string | null } = await platformRequest("posts", { authorUid: uid, cursor, pageSize: 100 });
+    posts.push(...page.posts); cursor = page.cursor;
+  } while (cursor);
 
   return Promise.all(posts.map(async (post) => ({
     post,
@@ -113,11 +97,12 @@ function groupByYear(items: PostWithThumb[]): YearGroup[] {
 function ThumbCell({ item }: { item: PostWithThumb }) {
   return (
     <Link
-      href={`/@${item.post.authorUsername}`}
+      href={`/post/${item.post.id}`}
       className="relative aspect-square bg-bg-secondary overflow-hidden rounded-lg group block"
     >
       {item.thumbUrl ? (
         <Image
+          unoptimized
           src={item.thumbUrl}
           alt={item.post.caption?.slice(0, 40) || "Memory"}
           fill

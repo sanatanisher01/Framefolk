@@ -11,11 +11,11 @@ const db = admin.firestore();
 /**
  * Triggered whenever a new Firebase Auth user is created.
  *
- * Creates the initial Firestore user document with status "pending".
+ * Creates the initial approved user document only when it does not already exist.
  * The user must then:
  *  1. Verify their email
  *  2. Complete onboarding (username, photo, bio)
- *  3. Wait for admin approval (status → "approved")
+ * Administrators can suspend or block accounts after registration.
  */
 export const onUserCreate = functions.auth.user().onCreate(async (user) => {
   const now = admin.firestore.FieldValue.serverTimestamp();
@@ -30,7 +30,7 @@ export const onUserCreate = functions.auth.user().onCreate(async (user) => {
     profilePhotoPublicId: "",
     coverPhotoUrl: "",
     coverPhotoPublicId: "",
-    status: "pending",
+    status: "approved",
     isPrivate: false,
     isEmailVerified: user.emailVerified,
     storageProvider: "central",
@@ -41,11 +41,14 @@ export const onUserCreate = functions.auth.user().onCreate(async (user) => {
     onboardingComplete: false,
     createdAt: now,
     updatedAt: now,
-    approvedAt: null,
+    approvedAt: now,
   };
 
   try {
-    await db.collection("users").doc(user.uid).set(userDoc);
+    await db.runTransaction(async tx => {
+      const ref = db.collection("users").doc(user.uid);
+      if (!(await tx.get(ref)).exists) tx.create(ref, userDoc);
+    });
 
     // Notify all super admins about the new registration
     const adminsSnap = await db

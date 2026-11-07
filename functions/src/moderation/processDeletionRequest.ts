@@ -1,3 +1,4 @@
+import { requirePermission } from "../lib/security";
 /**
  * FRAMEFOLK — processDeletionRequest Cloud Function
  *
@@ -29,6 +30,8 @@ export const processDeletionRequest = functions.https.onCall(
       throw new functions.https.HttpsError("permission-denied", "Admins only.");
     }
 
+    await requirePermission(context, "canApproveDeleteRequests");
+
     const { requestId, decision, adminNote } = data;
     if (!requestId || !decision) {
       throw new functions.https.HttpsError("invalid-argument", "requestId and decision are required.");
@@ -48,12 +51,15 @@ export const processDeletionRequest = functions.https.onCall(
     }
     const request = requestSnap.data()!;
 
-    if (request.status !== "pending") {
+    if (!["pending", "failed", "approved"].includes(request.status)) {
       throw new functions.https.HttpsError(
         "failed-precondition",
         `Request is already ${request.status as string}.`
       );
     }
+
+    const post = (await db.doc(`posts/${request.entityId}`).get()).data();
+    if (request.entityType !== "post" || !post || post.authorUid !== request.requesterUid) throw new functions.https.HttpsError("permission-denied", "Deletion ownership mismatch.");
 
     // ── Update request status ─────────────────────────────────────────────
     await requestRef.update({

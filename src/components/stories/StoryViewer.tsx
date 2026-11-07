@@ -7,7 +7,7 @@ import { X, ChevronLeft, ChevronRight, Eye, Send, Heart, MoreHorizontal } from "
 import { motion, AnimatePresence } from "framer-motion";
 import { Avatar } from "@/components/ui/Avatar";
 import { markStoryViewed, reactToStory } from "@/services/story.service";
-import { buildImageUrl } from "@/lib/cloudinary/config";
+import { useMediaDelivery } from "@/hooks/useMediaDelivery";
 import { formatRelativeTime } from "@/utils/format";
 import type { Story } from "@/types";
 
@@ -42,6 +42,9 @@ export function StoryViewer({ groups, initialGroupIndex = 0, currentUid, onClose
 
   const currentGroup = groups[groupIdx];
   const currentStory = currentGroup?.stories[storyIdx];
+  const mediaUrl = useMediaDelivery(currentStory?.mediaId);
+  const posterUrl = useMediaDelivery(currentStory?.mediaId, true);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   // Mark viewed
   useEffect(() => {
@@ -76,7 +79,7 @@ export function StoryViewer({ groups, initialGroupIndex = 0, currentUid, onClose
 
   // Progress timer
   useEffect(() => {
-    if (paused || showReactions) return;
+    if (paused || showReactions || currentStory?.type === "video") return;
     if (intervalRef.current) clearInterval(intervalRef.current);
 
     intervalRef.current = setInterval(() => {
@@ -84,7 +87,7 @@ export function StoryViewer({ groups, initialGroupIndex = 0, currentUid, onClose
         const next = p + (TICK_MS / STORY_DURATION_MS) * 100;
         if (next >= 100) {
           clearInterval(intervalRef.current!);
-          goNext();
+          queueMicrotask(goNext);
           return 0;
         }
         return next;
@@ -92,7 +95,13 @@ export function StoryViewer({ groups, initialGroupIndex = 0, currentUid, onClose
     }, TICK_MS);
 
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [paused, showReactions, groupIdx, storyIdx, goNext]);
+  }, [paused, showReactions, groupIdx, storyIdx, goNext, currentStory?.type]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (paused || showReactions) video.pause(); else video.play().catch(() => {});
+  }, [paused, showReactions, mediaUrl]);
 
   async function handleReaction(emoji: string) {
     if (!currentStory || !currentUid) return;
@@ -119,15 +128,6 @@ export function StoryViewer({ groups, initialGroupIndex = 0, currentUid, onClose
   const publicId = currentStory.cloudinaryPublicId ?? null;
   const isVideoStory = currentStory.type === "video";
 
-  const mediaUrl = publicId
-    ? isVideoStory
-      ? `https://res.cloudinary.com/${CLOUD_NAME}/video/upload/q_auto,f_auto/${publicId}`
-      : buildImageUrl(publicId, CLOUD_NAME, { width: 800 })
-    : null;
-
-  const posterUrl = publicId && isVideoStory
-    ? `https://res.cloudinary.com/${CLOUD_NAME}/video/upload/so_auto,w_800,f_jpg,q_auto/${publicId}`
-    : null;
 
   return (
     <div
@@ -225,12 +225,14 @@ export function StoryViewer({ groups, initialGroupIndex = 0, currentUid, onClose
                   autoPlay
                   playsInline
                   muted
-                  loop
+                  ref={videoRef}
+                  onEnded={goNext}
+                  onTimeUpdate={e => { const v = e.currentTarget; if (v.duration) setProgress(v.currentTime / v.duration * 100); }}
                   className="w-full h-full object-cover"
-                  onPlay={() => setPaused(false)}
                 />
               ) : mediaUrl ? (
                 <Image
+                  unoptimized
                   src={mediaUrl}
                   alt="Story"
                   fill

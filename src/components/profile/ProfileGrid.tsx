@@ -5,14 +5,16 @@ import Link from "next/link";
 import Image from "next/image";
 import {
   collection, query, where, orderBy, limit, startAfter,
-  getDocs, getDoc, doc, type QueryDocumentSnapshot,
+  getDocs, getDoc, doc, onSnapshot, type QueryDocumentSnapshot,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase/client";
+import { db, auth } from "@/lib/firebase/client";
 import { Grid3x3, Video, Play, Images } from "lucide-react";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { cn } from "@/utils/cn";
 import { buildImageUrl, buildVideoThumbnail } from "@/lib/cloudinary/config";
+import { getSignedDeliveryUrl } from "@/services/upload.service";
+import { platformRequest } from "@/services/platform.service";
 import type { Post, Media } from "@/types";
 
 const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME ?? "";
@@ -28,19 +30,8 @@ const PAGE_SIZE = 12;
 
 /** Fetch the coverMediaId's publicId from the media collection */
 async function fetchThumbnailUrl(post: Post): Promise<string | null> {
-  if (!db || !post.coverMediaId) return null;
-  try {
-    const snap = await getDoc(doc(db, "media", post.coverMediaId));
-    if (!snap.exists()) return null;
-    const media = snap.data() as Media;
-    if (!media.cloudinaryPublicId || !CLOUD_NAME) return null;
-    if (post.type === "video") {
-      return buildVideoThumbnail(media.cloudinaryPublicId, CLOUD_NAME);
-    }
-    return buildImageUrl(media.cloudinaryPublicId, CLOUD_NAME, { width: 400 });
-  } catch {
-    return null;
-  }
+  if (!post.coverMediaId) return null;
+  return getSignedDeliveryUrl(post.coverMediaId, true).catch(() => null);
 }
 
 export function ProfileGrid({ uid, type, isPrivate, isOwnProfile }: Props) {
@@ -49,35 +40,17 @@ export function ProfileGrid({ uid, type, isPrivate, isOwnProfile }: Props) {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
-  const [cursor, setCursor] = useState<QueryDocumentSnapshot | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
 
-  const load = useCallback(async (after?: QueryDocumentSnapshot) => {
+  const load = useCallback(async (after?: string) => {
     if (!db) return;
     if (!after) setLoading(true); else setLoadingMore(true);
     try {
-      const postType = type === "photo" ? ["photo", "multi"] : ["video"];
-      // Query with type filter — requires composite index on (authorUid, type, createdAt)
-      let q = query(
-        collection(db, "posts"),
-        where("authorUid", "==", uid),
-        where("type", "in", postType),
-        orderBy("createdAt", "desc"),
-        limit(PAGE_SIZE + 1)
-      );
-      if (after) q = query(q, startAfter(after));
-      const snap = await getDocs(q);
-      // Filter hidden posts client-side
-      const visibleDocs = snap.docs.filter((d) => d.data().isHidden !== true);
-      const pageDocs = visibleDocs.slice(0, PAGE_SIZE);
-      const newPosts = pageDocs.map(
-        (d: QueryDocumentSnapshot) => ({ id: d.id, ...d.data() } as Post)
-      );
-
-      if (!after) setPosts(newPosts);
-      else setPosts((prev) => [...prev, ...newPosts]);
-
-      setCursor(pageDocs[pageDocs.length - 1] ?? null);
-      setHasMore(visibleDocs.length > PAGE_SIZE);
+      const page = await platformRequest<{ posts: Post[]; cursor: string | null }>("posts", { authorUid: uid, type, cursor: after, pageSize: PAGE_SIZE });
+      const newPosts = page.posts;
+      if (!after) setPosts(newPosts); else setPosts(prev => [...prev, ...newPosts]);
+      setCursor(page.cursor);
+      setHasMore(!!page.cursor);
 
       // Fetch thumbnails for newly loaded posts
       const thumbPromises = newPosts.map(async (p) => {
@@ -100,8 +73,13 @@ export function ProfileGrid({ uid, type, isPrivate, isOwnProfile }: Props) {
   }, [uid, type]);
 
   useEffect(() => {
+    const currentUid = auth?.currentUser?.uid;
+    if (!currentUid || currentUid === uid || !db) return;
+    return onSnapshot(doc(db, "followers", currentUid, "following", uid), () => { void load(); }, () => {});
+  }, [uid, load]);
+
+  useEffect(() => {
     if (!db) { setLoading(false); return; }
-    if (isPrivate && !isOwnProfile) { setLoading(false); return; }
     load();
   }, [uid, type, isPrivate, isOwnProfile, load]);
 
@@ -115,13 +93,14 @@ export function ProfileGrid({ uid, type, isPrivate, isOwnProfile }: Props) {
     );
   }
 
-  if (isPrivate && !isOwnProfile) return null;
 
   if (posts.length === 0) {
     return (
       <EmptyState
         icon={type === "photo" ? Grid3x3 : Video}
         title={`No ${type === "photo" ? "photos" : "videos"} yet`}
+        actionLabel={cursor ? "Check older posts" : undefined}
+        onAction={cursor ? () => { void load(cursor); } : undefined}
         description={
           isOwnProfile
             ? `Upload your first ${type === "photo" ? "photo" : "video"} to get started.`
@@ -168,6 +147,7 @@ function PostThumbnail({ post, thumbnailUrl }: { post: Post; thumbnailUrl?: stri
     >
       {thumbnailUrl ? (
         <Image
+          unoptimized
           src={thumbnailUrl}
           alt={post.caption ? post.caption.slice(0, 60) : "Post"}
           fill

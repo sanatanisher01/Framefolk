@@ -20,7 +20,9 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { Grid3x3, Video, BookImage, Tag, Lock } from "lucide-react";
 import { buildImageUrl, buildVideoThumbnail } from "@/lib/cloudinary/config";
 import { formatRelativeTime } from "@/utils/format";
-import type { User, Album } from "@/types";
+import { getSignedDeliveryUrl } from "@/services/upload.service";
+import { platformRequest } from "@/services/platform.service";
+import type { User, Album, Post } from "@/types";
 
 const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME ?? "";
 
@@ -268,40 +270,18 @@ function ProfileTaggedTab({
 
   useEffect(() => {
     if (!db) { setLoading(false); return; }
-    if (isPrivate && !isOwnProfile) { setLoading(false); return; }
 
     async function load() {
       if (!db) return;
       try {
-        const q = query(
-          collection(db, "posts"),
-          where("mentions", "array-contains", username.toLowerCase()),
-          where("isHidden", "==", false),
-          orderBy("createdAt", "desc"),
-          limit(24)
-        );
-        const snap = await getDocs(q);
+        const page = await platformRequest<{ posts: Post[] }>("posts", { mention: username.toLowerCase(), pageSize: 24 });
         const results: TaggedPost[] = await Promise.all(
-          snap.docs.map(async (d) => {
-            const data = d.data();
+          page.posts.map(async (data) => {
             const coverMediaId = data.coverMediaId as string | undefined;
             let mediaUrl: string | null = null;
-            if (coverMediaId && db) {
-              try {
-                const mediaSnap = await getDoc(doc(db, "media", coverMediaId));
-                if (mediaSnap.exists()) {
-                  const m = mediaSnap.data();
-                  const pid = m.cloudinaryPublicId as string;
-                  if (pid && CLOUD_NAME) {
-                    mediaUrl = m.resourceType === "video"
-                      ? buildVideoThumbnail(pid, CLOUD_NAME)
-                      : buildImageUrl(pid, CLOUD_NAME, { width: 300 });
-                  }
-                }
-              } catch { /* ignore */ }
-            }
+            if (coverMediaId) mediaUrl = await getSignedDeliveryUrl(coverMediaId, true).catch(() => null);
             return {
-              id: d.id,
+              id: data.id,
               authorUsername: (data.authorUsername as string) ?? "",
               mediaUrl,
             };
@@ -328,7 +308,6 @@ function ProfileTaggedTab({
     );
   }
 
-  if (isPrivate && !isOwnProfile) return null;
 
   if (posts.length === 0) {
     return (
@@ -347,11 +326,12 @@ function ProfileTaggedTab({
       {posts.map((post) => (
         <Link
           key={post.id}
-          href={`/@${post.authorUsername}`}
+          href={`/post/${post.id}`}
           className="relative aspect-square bg-bg-secondary overflow-hidden group hover:opacity-90 transition-opacity"
         >
           {post.mediaUrl ? (
             <Image
+              unoptimized
               src={post.mediaUrl}
               alt="Tagged post"
               fill

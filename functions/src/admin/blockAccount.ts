@@ -1,3 +1,4 @@
+import { requirePermission } from "../lib/security";
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 
@@ -11,6 +12,8 @@ export const blockAccount = functions.https.onCall(
     if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Sign in required.");
     const isAdmin = context.auth.token.role === "superAdmin" || context.auth.token.role === "moderator";
     if (!isAdmin) throw new functions.https.HttpsError("permission-denied", "Admins only.");
+
+    await requirePermission(context, "canBlockAccounts", data.targetUid);
 
     const { targetUid, reason } = data;
     if (!targetUid) throw new functions.https.HttpsError("invalid-argument", "targetUid required.");

@@ -61,6 +61,7 @@ export type NotificationType =
   | "comment"
   | "follow"
   | "followRequest"
+  | "followAccepted"
   | "storyReply"
   | "message"
   | "albumInvite"

@@ -26,9 +26,10 @@ const OPTIONS: VisibilityOption[] = [
 interface Props {
   value: PostVisibility;
   onChange: (v: PostVisibility) => void;
+  allowAudiences?: boolean;
 }
 
-export function VisibilitySelector({ value, onChange }: Props) {
+export function VisibilitySelector({ value, onChange, allowAudiences = false }: Props) {
   const current = OPTIONS.find((o) => o.value === value) ?? OPTIONS[0];
   const Icon = current.icon;
 
@@ -44,7 +45,7 @@ export function VisibilitySelector({ value, onChange }: Props) {
       <DropdownMenuContent align="start" className="w-56">
         <DropdownMenuLabel>Who can see this?</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        {OPTIONS.map((opt) => {
+        {OPTIONS.filter(opt => allowAudiences || !["custom", "closeFriends"].includes(opt.value)).map((opt) => {
           const OptIcon = opt.icon;
           const isSelected = opt.value === value;
           return (

@@ -3,6 +3,8 @@
  * Personal and collaborative albums.
  */
 "use client";
+import { getSignedDeliveryUrl } from "./upload.service";
+import { platformRequest, poll } from "./platform.service";
 
 import {
   collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc,
@@ -26,8 +28,9 @@ export interface CreateAlbumPayload {
 
 export async function createAlbum(payload: CreateAlbumPayload): Promise<string> {
   if (!db) throw new Error("Firebase not configured");
+  const batch = writeBatch(db);
   const albumRef = doc(collection(db, "albums"));
-  await setDoc(albumRef, {
+  batch.set(albumRef, {
     id: albumRef.id,
     ownerUid: payload.ownerUid,
     title: payload.title,
@@ -41,7 +44,7 @@ export async function createAlbum(payload: CreateAlbumPayload): Promise<string> 
     updatedAt: serverTimestamp(),
   });
   // Add owner as member
-  await setDoc(doc(db, "albumMembers", `${albumRef.id}_${payload.ownerUid}`), {
+  batch.set(doc(db, "albumMembers", `${albumRef.id}_${payload.ownerUid}`), {
     albumId: albumRef.id,
     uid: payload.ownerUid,
     role: "owner",
@@ -50,6 +53,8 @@ export async function createAlbum(payload: CreateAlbumPayload): Promise<string> 
     joinedAt: serverTimestamp(),
     createdAt: serverTimestamp(),
   });
+  await batch.commit();
+  window.dispatchEvent(new Event("framefolk:updated"));
   return albumRef.id;
 }
 
@@ -57,25 +62,8 @@ export async function createAlbum(payload: CreateAlbumPayload): Promise<string> 
 // Load albums for a user
 // ─────────────────────────────────────────────
 
-export function subscribeToMyAlbums(
-  uid: string,
-  callback: (albums: Album[]) => void
-): Unsubscribe {
-  if (!db) return () => {};
-  const q = query(
-    collection(db, "albums"),
-    where("ownerUid", "==", uid),
-    orderBy("updatedAt", "desc"),
-    limit(50)
-  );
-  return onSnapshot(q, (snap) => {
-    callback(snap.docs.map((d) => ({
-      id: d.id,
-      ...d.data(),
-      createdAt: d.data().createdAt?.toDate() ?? new Date(),
-      updatedAt: d.data().updatedAt?.toDate() ?? new Date(),
-    } as Album)));
-  });
+export function subscribeToMyAlbums(uid: string, callback: (albums: Album[]) => void): Unsubscribe {
+ return poll(() => platformRequest<Album[]>("albums", { ownerUid: uid }), callback, () => callback([]));
 }
 
 export async function getAlbum(albumId: string): Promise<Album | null> {
@@ -94,109 +82,33 @@ export async function getAlbum(albumId: string): Promise<Album | null> {
 // Add media to album
 // ─────────────────────────────────────────────
 
-export async function addMediaToAlbum(
-  albumId: string,
-  mediaId: string,
-  setCover = false
-): Promise<void> {
-  if (!db) return;
-  const albumRef = doc(db, "albums", albumId);
-  const mediaRef = doc(db, "media", mediaId);
-
-  const batch = writeBatch(db);
-  batch.update(albumRef, {
-    mediaCount: increment(1),
-    ...(setCover && { coverMediaId: mediaId }),
-    updatedAt: serverTimestamp(),
-  });
-  batch.update(mediaRef, { albumId, updatedAt: serverTimestamp() });
-  await batch.commit();
+export async function addMediaToAlbum(albumId: string, mediaId: string, setCover = false): Promise<void> {
+ await platformRequest("albumMedia", { albumId, mediaId, setCover });
 }
 
-export async function removeMediaFromAlbum(
-  albumId: string,
-  mediaId: string
-): Promise<void> {
-  if (!db) return;
-  const batch = writeBatch(db);
-  batch.update(doc(db, "albums", albumId), {
-    mediaCount: increment(-1),
-    updatedAt: serverTimestamp(),
-  });
-  batch.update(doc(db, "media", mediaId), {
-    albumId: null,
-    updatedAt: serverTimestamp(),
-  });
-  await batch.commit();
+export async function removeMediaFromAlbum(albumId: string, mediaId: string): Promise<void> {
+ await platformRequest("albumMedia", { albumId, mediaId, remove: true });
 }
 
 // ─────────────────────────────────────────────
 // Load media in an album
 // ─────────────────────────────────────────────
 
-export async function getAlbumMedia(albumId: string) {
-  if (!db) return [];
-  const q = query(
-    collection(db, "media"),
-    where("albumId", "==", albumId),
-    orderBy("createdAt", "desc"),
-    limit(100)
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+export async function getAlbumMedia(albumId: string): Promise<Record<string, unknown>[]> {
+ const media = await platformRequest<Record<string, unknown>[]>("albumMediaPage", { albumId });
+ return Promise.all(media.map(async item => ({ ...item, thumbnailUrl: await getSignedDeliveryUrl(item.id as string, true).catch(() => "") })));
 }
 
 // ─────────────────────────────────────────────
 // Collaborative: invite member
 // ─────────────────────────────────────────────
 
-export async function inviteToAlbum(
-  albumId: string,
-  inviterUid: string,
-  inviteeUid: string,
-  role: "contributor" | "viewer"
-): Promise<void> {
-  if (!db) return;
-  const memberId = `${albumId}_${inviteeUid}`;
-  await setDoc(doc(db, "albumMembers", memberId), {
-    albumId,
-    uid: inviteeUid,
-    role,
-    invitedBy: inviterUid,
-    status: "pending",
-    joinedAt: null,
-    createdAt: serverTimestamp(),
-  });
-  // Also create an invitation notification
-  await setDoc(doc(collection(db, "invitations")), {
-    type: "album",
-    entityId: albumId,
-    inviterUid,
-    inviteeUid,
-    role,
-    status: "pending",
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
+export async function inviteToAlbum(albumId: string, inviterUid: string, inviteeUid: string, role: "contributor" | "viewer"): Promise<void> {
+ await platformRequest("albumInvite", { albumId, targetUid: inviteeUid, role });
 }
 
-export async function respondToAlbumInvite(
-  albumId: string,
-  uid: string,
-  accept: boolean
-): Promise<void> {
-  if (!db) return;
-  const memberId = `${albumId}_${uid}`;
-  await updateDoc(doc(db, "albumMembers", memberId), {
-    status: accept ? "accepted" : "rejected",
-    joinedAt: accept ? serverTimestamp() : null,
-  });
-  if (accept) {
-    await updateDoc(doc(db, "albums", albumId), {
-      memberCount: increment(1),
-    });
-  }
+export async function respondToAlbumInvite(albumId: string, uid: string, accept: boolean): Promise<void> {
+ await platformRequest("albumRespond", { albumId, accept });
 }
 
 export async function getAlbumMembers(albumId: string): Promise<AlbumMember[]> {
@@ -231,14 +143,5 @@ export async function updateAlbum(
 }
 
 export async function deleteAlbum(albumId: string, ownerUid: string): Promise<void> {
-  if (!db) return;
-  // Unlink media from album (don't delete media)
-  const mediaSnap = await getDocs(
-    query(collection(db, "media"), where("albumId", "==", albumId), limit(200))
-  );
-  const batch = writeBatch(db);
-  mediaSnap.docs.forEach((d) => batch.update(d.ref, { albumId: null }));
-  batch.delete(doc(db, "albums", albumId));
-  batch.delete(doc(db, "albumMembers", `${albumId}_${ownerUid}`));
-  await batch.commit();
+ await platformRequest("albumDelete", { albumId });
 }

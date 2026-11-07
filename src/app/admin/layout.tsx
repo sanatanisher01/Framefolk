@@ -1,7 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useEffect } from "react";
+import { useAuth } from "@/lib/auth/AuthContext";
+import { FullPageSpinner } from "@/components/ui/Spinner";
+import { useRouter, usePathname } from "next/navigation";
 import {
   LayoutDashboard, Users, UserCheck, FileWarning,
   Trash2, Flag, ShieldCheck, ScrollText, Settings,
@@ -23,6 +26,11 @@ const adminNav = [
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { isAdmin, user, initialized, loading } = useAuth();
+  useEffect(() => { if (initialized && !loading && (!isAdmin || user?.status !== "approved")) router.replace(user ? "/home" : "/login"); }, [initialized, loading, isAdmin, user, router]);
+  if (!initialized || loading) return <FullPageSpinner />;
+  if (!isAdmin || user?.status !== "approved") return null;
 
   function isActive(item: typeof adminNav[0]) {
     if (item.exact) return pathname === item.href;

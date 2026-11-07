@@ -29,7 +29,8 @@ export function StepVerifyEmail({ firebaseUser, onVerified }: Props) {
       try {
         await reload(firebaseUser);
         if (firebaseUser.emailVerified) {
-          onVerified();
+          await firebaseUser.getIdToken(true);
+        onVerified();
           clearInterval(interval);
         }
       } catch {
@@ -67,6 +68,7 @@ export function StepVerifyEmail({ firebaseUser, onVerified }: Props) {
     try {
       await reload(firebaseUser);
       if (firebaseUser.emailVerified) {
+        await firebaseUser.getIdToken(true);
         onVerified();
       }
     } catch {

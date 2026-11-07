@@ -40,30 +40,35 @@ export function MessagesPage() {
     setLoadingConvs(true);
 
     const unsub = subscribeToConversations(user.uid, async (convs) => {
-      const enriched = await Promise.all(
-        convs.map(async (conv) => {
-          const partnerUid = conv.participants.find((p) => p !== user.uid) ?? "";
-          let partnerUsername = "";
-          let partnerDisplayName = "";
-          let partnerPhotoUrl = "";
-          try {
-            const profile = await getConversationPartner(conv.id, user.uid);
-            partnerUsername = profile?.username ?? "";
-            partnerDisplayName = profile?.displayName ?? "";
-            partnerPhotoUrl = profile?.photoUrl ?? "";
-          } catch { /* ignore */ }
-          return {
-            conv,
-            partnerUid,
-            partnerUsername,
-            partnerDisplayName,
-            partnerPhotoUrl,
-            unreadCount: (conv.unreadCounts as Record<string, number>)?.[user.uid] ?? 0,
-          };
-        })
-      );
-      setConvItems(enriched);
-      setLoadingConvs(false);
+      try {
+        const enriched = await Promise.all(
+          convs.map(async (conv) => {
+            const partnerUid = conv.participants.find((p) => p !== user.uid) ?? "";
+            let partnerUsername = "";
+            let partnerDisplayName = "";
+            let partnerPhotoUrl = "";
+            try {
+              const profile = await getConversationPartner(conv.id, user.uid);
+              partnerUsername = profile?.username ?? "";
+              partnerDisplayName = profile?.displayName ?? "";
+              partnerPhotoUrl = profile?.photoUrl ?? "";
+            } catch { /* ignore individual partner fetch failures */ }
+            return {
+              conv,
+              partnerUid,
+              partnerUsername,
+              partnerDisplayName,
+              partnerPhotoUrl,
+              unreadCount: (conv.unreadCounts as Record<string, number>)?.[user.uid] ?? 0,
+            };
+          })
+        );
+        setConvItems(enriched);
+      } catch {
+        setConvItems([]);
+      } finally {
+        setLoadingConvs(false);
+      }
     });
 
     return unsub;

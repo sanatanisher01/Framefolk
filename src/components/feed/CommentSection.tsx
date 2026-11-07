@@ -6,7 +6,7 @@ import { Send, Reply, Trash2 } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Spinner } from "@/components/ui/Spinner";
 import {
-  subscribeToComments,
+  subscribeToComments, subscribeToReplies,
   addComment,
   deleteComment,
   addReply,
@@ -26,6 +26,7 @@ export function CommentSection({ postId, currentUid, currentUsername, currentPho
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
   const [commentText, setCommentText] = useState("");
+  const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [replyTo, setReplyTo] = useState<{ id: string; username: string } | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -42,7 +43,7 @@ export function CommentSection({ postId, currentUid, currentUsername, currentPho
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!currentUid || !commentText.trim() || submitting) return;
-    setSubmitting(true);
+    setSubmitting(true); setError("");
     try {
       if (replyTo) {
         await addReply(
@@ -58,7 +59,7 @@ export function CommentSection({ postId, currentUid, currentUsername, currentPho
       setCommentText("");
       setReplyTo(null);
     } catch {
-      // silently ignore — UI stays intact
+      setError("Could not save your comment. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -99,6 +100,7 @@ export function CommentSection({ postId, currentUid, currentUsername, currentPho
         </ul>
       )}
 
+      {error && <p role="alert" className="text-xs text-red-400">{error}</p>}
       {/* Input */}
       {currentUid && (
         <form onSubmit={handleSubmit} className="flex items-end gap-2 pt-2 border-t border-border/50">
@@ -161,6 +163,8 @@ function CommentRow({
   onReply: (id: string, username: string) => void;
 }) {
   const [deleting, setDeleting] = useState(false);
+  const [replies, setReplies] = useState<Comment[]>([]);
+  useEffect(() => subscribeToReplies(postId, comment.id, setReplies), [postId, comment.id]);
 
   async function handleDelete() {
     if (!currentUid || currentUid !== comment.authorUid) return;
@@ -216,6 +220,7 @@ function CommentRow({
             </button>
           )}
         </div>
+        {replies.map(reply => <div key={reply.id} className="ml-3 mt-2 border-l border-border pl-3 text-xs"><Link className="font-semibold mr-2" href={`/@${reply.authorUsername}`}>@{reply.authorUsername}</Link><span>{reply.text}</span></div>)}
       </div>
     </li>
   );

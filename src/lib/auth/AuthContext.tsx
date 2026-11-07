@@ -9,12 +9,12 @@ import {
   type ReactNode,
 } from "react";
 import {
-  onAuthStateChanged,
+  onIdTokenChanged,
   type User as FirebaseUser,
 } from "firebase/auth";
 import { doc, onSnapshot } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase/client";
-import { startSessionSync } from "./session";
+import { clearSessionCookie } from "./session";
 import type { User, AccountStatus } from "@/types";
 
 // ─────────────────────────────────────────────
@@ -84,10 +84,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     // Keep ff_session cookie in sync for middleware
-    const stopSessionSync = startSessionSync();
+    clearSessionCookie();
+    let generation = 0;
+    let currentUid: string | null = null;
     let firestoreUnsub: (() => void) | null = null;
 
-    const authUnsub = onAuthStateChanged(auth, async (fbUser) => {
+    const authUnsub = onIdTokenChanged(auth, async (fbUser) => {
+      const currentGeneration = ++generation;
+      if (currentUid !== (fbUser?.uid ?? null)) {
+        currentUid = fbUser?.uid ?? null;
+        setLoading(true);
+        setUser(null);
+      }
       // Clean up previous Firestore listener
       if (firestoreUnsub) {
         firestoreUnsub();
@@ -108,6 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Read custom claims for admin check
       try {
         const tokenResult = await fbUser.getIdTokenResult();
+        if (currentGeneration !== generation) return;
         setIsAdmin(
           tokenResult.claims.role === "superAdmin" ||
             tokenResult.claims.role === "moderator"
@@ -115,6 +124,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         setIsAdmin(false);
       }
+
+      if (currentGeneration !== generation) return;
 
       // Subscribe to Firestore user document in real-time
       if (!db) {
@@ -127,6 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       firestoreUnsub = onSnapshot(
         userRef,
         (snap) => {
+          if (currentGeneration !== generation) return;
           if (snap.exists()) {
             const data = snap.data();
             setUser({
@@ -170,7 +182,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       authUnsub();
-      stopSessionSync();
+      generation++;
       if (firestoreUnsub) firestoreUnsub();
     };
   }, []);

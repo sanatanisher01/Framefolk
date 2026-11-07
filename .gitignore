@@ -56,3 +56,8 @@ next-env.d.ts
 
 # OS
 Thumbs.db
+
+# Local regression runtime and logs
+/.next-test/
+/firestore-test.log
+/firebase-debug.log

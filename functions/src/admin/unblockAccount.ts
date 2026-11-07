@@ -1,3 +1,4 @@
+import { requirePermission } from "../lib/security";
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 
@@ -9,9 +10,11 @@ const auth = admin.auth();
 export const unblockAccount = functions.https.onCall(
   async (data: { targetUid: string }, context) => {
     if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Sign in required.");
-    if (context.auth.token.role !== "superAdmin") {
+    if (!["superAdmin", "moderator"].includes(context.auth.token.role as string)) {
       throw new functions.https.HttpsError("permission-denied", "Super Admins only.");
     }
+
+    await requirePermission(context, "canBlockAccounts", data.targetUid);
 
     const { targetUid } = data;
     const now = admin.firestore.FieldValue.serverTimestamp();
@@ -24,7 +27,7 @@ export const unblockAccount = functions.https.onCall(
 
     await db.collection("auditLogs").add({
       actorUid: context.auth.uid,
-      actorRole: "superAdmin",
+      actorRole: context.auth.token.role,
       action: "accountUnblocked",
       targetUid,
       targetEntityType: "user",

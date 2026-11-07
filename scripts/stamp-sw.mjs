@@ -17,13 +17,8 @@ if (!existsSync(swPath)) {
 
 const content = readFileSync(swPath, "utf8");
 
-if (!content.includes("BUILD_TIME")) {
-  console.log("[stamp-sw] Already stamped, skipping.");
-  process.exit(0);
-}
-
 const stamp = Date.now().toString(36);
-const updated = content.replace("BUILD_TIME", stamp);
+const updated = content.replace(/const CACHE_VERSION = "[^"]*";/, `const CACHE_VERSION = "${stamp}";`);
 writeFileSync(swPath, updated, "utf8");
 
 console.log(`[stamp-sw] Cache version stamped: v1-${stamp}`);

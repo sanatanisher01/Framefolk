@@ -26,6 +26,9 @@ export async function createNotification(payload: NotificationPayload): Promise<
   // Don't notify yourself
   if (payload.recipientUid === payload.senderUid) return;
 
+  const prefs = (await db.doc(`notificationPrefs/${payload.recipientUid}`).get()).data();
+  const keys: Record<string,string> = { like: "likes", comment: "comments", follow: "follows", followRequest: "followRequests", message: "messages", albumInvite: "albumInvites", adminAction: "adminActions" };
+  if (prefs?.[keys[payload.type]] === false) return;
   const notifRef = db.collection("notifications").doc();
   await notifRef.set({
     ...payload,
@@ -53,10 +56,11 @@ export const markNotificationsRead = functions.https.onCall(
     const now = admin.firestore.FieldValue.serverTimestamp();
     const batch = db.batch();
 
-    for (const id of notificationIds.slice(0, 500)) {
-      const ref = db.collection("notifications").doc(id);
-      batch.update(ref, { isRead: true, readAt: now });
-    }
+    const ids = Array.from(new Set(notificationIds));
+    if (ids.length > 500 || ids.some(id => typeof id !== "string" || !id || id.includes("/"))) throw new functions.https.HttpsError("invalid-argument", "Invalid notification IDs.");
+    const docs = await db.getAll(...ids.map(id => db.collection("notifications").doc(id)));
+    if (docs.some(doc => doc.data()?.recipientUid !== context.auth!.uid)) throw new functions.https.HttpsError("permission-denied", "These notifications do not belong to you.");
+    docs.forEach(doc => batch.update(doc.ref, { isRead: true, readAt: now }));
 
     await batch.commit();
     return { success: true };

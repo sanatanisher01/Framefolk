@@ -20,6 +20,8 @@ import { Avatar } from "@/components/ui/Avatar";
 import { buildImageUrl, buildVideoThumbnail } from "@/lib/cloudinary/config";
 import { Search, Grid3x3, Play, Images, Users } from "lucide-react";
 import { useDebounce } from "@/hooks/useDebounce";
+import { getSignedDeliveryUrl } from "@/services/upload.service";
+import { platformRequest } from "@/services/platform.service";
 import type { Post, Media, User } from "@/types";
 
 const PAGE_SIZE = 24;
@@ -43,7 +45,7 @@ export function ExplorePage() {
   const [userResults, setUserResults] = useState<Partial<User>[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [cursor, setCursor] = useState<QueryDocumentSnapshot | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
@@ -52,24 +54,13 @@ export function ExplorePage() {
     const isMulti = post.type === "multi";
     let thumbUrl = "";
 
-    if (post.coverMediaId && db) {
-      try {
-        const snap = await getDoc(doc(db, "media", post.coverMediaId));
-        if (snap.exists()) {
-          const m = snap.data() as Partial<Media>;
-          const pid = m.cloudinaryPublicId ?? "";
-          thumbUrl = isVideo
-            ? buildVideoThumbnail(pid, CLOUD_NAME)
-            : buildImageUrl(pid, CLOUD_NAME, { width: 400 });
-        }
-      } catch { /* no thumbnail */ }
-    }
+    if (post.coverMediaId) thumbUrl = await getSignedDeliveryUrl(post.coverMediaId, true).catch(() => "");
 
     return { post, thumbUrl, isVideo, isMulti };
   }
 
   const loadPosts = useCallback(
-    async (afterCursor?: QueryDocumentSnapshot) => {
+    async (afterCursor?: string) => {
       if (!db) return;
 
       const tag = debouncedSearch.startsWith("#")
@@ -86,78 +77,14 @@ export function ExplorePage() {
       if (username && !afterCursor) {
         setUserResults([]);
         try {
-          // Search users by username prefix
-          const uq = query(
-            collection(db, "users"),
-            where("username", ">=", username),
-            where("username", "<=", username + "\uf8ff"),
-            limit(5)
-          );
-          const usnap = await getDocs(uq);
-          setUserResults(usnap.docs.map((d) => ({ uid: d.id, ...d.data() } as Partial<User>)));
+          setUserResults(await platformRequest<Partial<User>[]>("searchUsers", { search: username, count: 5 }));
         } catch { /* ignore */ }
       } else if (!afterCursor) {
         setUserResults([]);
       }
 
-      let q = query(
-        collection(db, "posts"),
-        where("visibility", "==", "public"),
-        orderBy("createdAt", "desc"),
-        limit(PAGE_SIZE + 1)
-      );
-
-      if (tag) {
-        q = query(
-          collection(db, "posts"),
-          where("visibility", "==", "public"),
-          where("hashtags", "array-contains", tag),
-          orderBy("createdAt", "desc"),
-          limit(PAGE_SIZE + 1)
-        );
-      }
-
-      if (username) {
-        q = query(
-          collection(db, "posts"),
-          where("authorUsername", "==", username),
-          where("visibility", "==", "public"),
-          orderBy("createdAt", "desc"),
-          limit(PAGE_SIZE + 1)
-        );
-      }
-
-      if (keyword) {
-        // Keyword search — filter by authorUsername prefix as best effort
-        q = query(
-          collection(db, "posts"),
-          where("visibility", "==", "public"),
-          where("authorUsername", ">=", keyword),
-          where("authorUsername", "<=", keyword + "\uf8ff"),
-          orderBy("authorUsername"),
-          orderBy("createdAt", "desc"),
-          limit(PAGE_SIZE + 1)
-        );
-      }
-
-      if (afterCursor) q = query(q, startAfter(afterCursor));
-
-      const snap = await getDocs(q);
-      // Filter hidden posts client-side
-      const visibleDocs = snap.docs.filter((d) => d.data().isHidden !== true);
-      const more = visibleDocs.length > PAGE_SIZE;
-      const docs = visibleDocs.slice(0, PAGE_SIZE);
-
-      const rawPosts: Post[] = docs.map((d) => {
-        const data = d.data();
-        return {
-          id: d.id,
-          ...data,
-          createdAt: data.createdAt?.toDate?.() ?? new Date(),
-          updatedAt: data.updatedAt?.toDate?.() ?? new Date(),
-        } as Post;
-      });
-
+      const page = await platformRequest<{ posts: Post[]; cursor: string | null }>("posts", { mode: "explore", search: debouncedSearch, cursor: afterCursor, pageSize: PAGE_SIZE });
+      const rawPosts = page.posts;
       const resolved = await Promise.all(rawPosts.map(resolveThumb));
 
       if (afterCursor) {
@@ -166,8 +93,8 @@ export function ExplorePage() {
         setItems(resolved);
       }
 
-      setHasMore(more);
-      setCursor(more ? docs[docs.length - 1] : null);
+      setHasMore(!!page.cursor);
+      setCursor(page.cursor);
     },
     [debouncedSearch] // eslint-disable-line react-hooks/exhaustive-deps
   );
@@ -175,7 +102,7 @@ export function ExplorePage() {
   useEffect(() => {
     setLoading(true);
     setCursor(null);
-    loadPosts().finally(() => setLoading(false));
+    loadPosts().catch(error => { console.error(error); setItems([]); }).finally(() => setLoading(false));
   }, [loadPosts]);
 
   useEffect(() => {
@@ -193,7 +120,7 @@ export function ExplorePage() {
     );
     obs.observe(el);
     return () => obs.disconnect();
-  }, [hasMore, loadingMore, cursor, loadPosts]);
+  }, [loading, hasMore, loadingMore, cursor, loadPosts]);
 
   useEffect(() => {
     const tag = searchParams.get("tag");
@@ -336,6 +263,7 @@ function ExploreCell({
     >
       {thumbUrl ? (
         <Image
+          unoptimized
           src={thumbUrl}
           alt=""
           fill

@@ -11,6 +11,7 @@ import { useAuth } from "@/lib/auth/AuthContext";
 import { createStory } from "@/services/story.service";
 import { uploadFile } from "@/services/upload.service";
 import { MobileHeader } from "@/components/layout/MobileHeader";
+import { AudienceEditor } from "@/components/upload/AudienceEditor";
 import { VisibilitySelector } from "@/components/upload/VisibilitySelector";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/utils/cn";
@@ -38,6 +39,7 @@ export function StoryCreator() {
   const [preview, setPreview] = useState<string | null>(null);
   const [textContent, setTextContent] = useState("");
   const [selectedBg, setSelectedBg] = useState(TEXT_BACKGROUNDS[0]);
+  const [customAudienceUids, setCustomAudienceUids] = useState<string[]>([]);
   const [visibility, setVisibility] = useState<PostVisibility>("followers");
   const [caption, setCaption] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -74,26 +76,19 @@ export function StoryCreator() {
     if (storyType !== "text" && !file) { setError("Please add a photo or video."); return; }
     if (storyType === "text" && !textContent.trim()) { setError("Please enter some text."); return; }
 
+    if (visibility === "custom" && !customAudienceUids.length) { setError("Choose at least one person."); return; }
     setUploading(true);
     setError(null);
     setUploadProgress(0);
 
     try {
-      // For media stories, upload separately so we can track progress
-      if ((storyType === "photo" || storyType === "video") && file) {
-        await uploadFile(file, {
-          context: "story",
-          isPrivate: visibility !== "public",
-          onProgress: (pct) => setUploadProgress(pct),
-        });
-      }
-
       await createStory({
+        onProgress: setUploadProgress,
         authorUid: user.uid,
         authorUsername: user.username,
         authorPhotoUrl: user.profilePhotoUrl,
         type: storyType,
-        visibility,
+        visibility, customAudienceUids,
         file: file ?? undefined,
         textContent: storyType === "text" ? textContent : undefined,
         textStyle: storyType === "text"
@@ -275,7 +270,8 @@ export function StoryCreator() {
         {/* Visibility */}
         <div className="flex items-center gap-3">
           <span className="text-sm text-text-secondary">Audience:</span>
-          <VisibilitySelector value={visibility} onChange={setVisibility} />
+          <VisibilitySelector value={visibility} onChange={setVisibility} allowAudiences />
+          {["custom", "closeFriends"].includes(visibility) && <AudienceEditor closeFriends={visibility === "closeFriends"} value={customAudienceUids} onChange={setCustomAudienceUids} />}
         </div>
 
         {/* Error */}

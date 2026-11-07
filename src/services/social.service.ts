@@ -3,6 +3,7 @@
  * Likes, saves, comments, shares, reports.
  */
 "use client";
+import { platformRequest } from "./platform.service";
 
 import {
   doc, setDoc, deleteDoc, getDoc, addDoc, updateDoc,
@@ -57,41 +58,11 @@ async function createNotification({
 // ─────────────────────────────────────────────
 
 export async function likePost(uid: string, postId: string): Promise<void> {
-  if (!db) return;
-  const likeRef = doc(db, "posts", postId, "likes", uid);
-  const postRef = doc(db, "posts", postId);
-  await setDoc(likeRef, { uid, createdAt: serverTimestamp() });
-  await updateDoc(postRef, { likesCount: increment(1) });
-
-  // Fan-out: notify post author
-  try {
-    const postSnap = await getDoc(postRef);
-    if (postSnap.exists()) {
-      const post = postSnap.data();
-      const likerSnap = await getDoc(doc(db, "users", uid));
-      if (likerSnap.exists()) {
-        const liker = likerSnap.data();
-        await createNotification({
-          recipientUid: post.authorUid as string,
-          senderUid: uid,
-          senderUsername: (liker.username as string) ?? "",
-          senderPhotoUrl: (liker.profilePhotoUrl as string) ?? "",
-          type: "like",
-          entityType: "post",
-          entityId: postId,
-          text: `@${(liker.username as string) ?? "someone"} liked your post.`,
-        });
-      }
-    }
-  } catch { /* notifications are non-critical */ }
+  await platformRequest("like", { postId });
 }
 
 export async function unlikePost(uid: string, postId: string): Promise<void> {
-  if (!db) return;
-  const likeRef = doc(db, "posts", postId, "likes", uid);
-  const postRef = doc(db, "posts", postId);
-  await deleteDoc(likeRef);
-  await updateDoc(postRef, { likesCount: increment(-1) });
+  await platformRequest("unlike", { postId });
 }
 
 export async function isPostLiked(uid: string, postId: string): Promise<boolean> {
@@ -139,76 +110,16 @@ export async function isPostSaved(uid: string, postId: string): Promise<boolean>
 // Comments
 // ─────────────────────────────────────────────
 
-export async function addComment(
-  uid: string,
-  username: string,
-  photoUrl: string,
-  postId: string,
-  text: string
-): Promise<string> {
-  if (!db) throw new Error("Firebase not configured");
-  const postRef = doc(db, "posts", postId);
-  const commentsRef = collection(db, "posts", postId, "comments");
-
-  const commentRef = await addDoc(commentsRef, {
-    authorUid: uid,
-    authorUsername: username,
-    authorPhotoUrl: photoUrl,
-    text: text.trim(),
-    mentions: [],
-    likesCount: 0,
-    repliesCount: 0,
-    isDeleted: false,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-
-  await updateDoc(postRef, { commentsCount: increment(1) });
-
-  // Fan-out: notify post author
-  try {
-    const postSnap = await getDoc(postRef);
-    if (postSnap.exists()) {
-      const post = postSnap.data();
-      const preview = text.trim().slice(0, 60);
-      await createNotification({
-        recipientUid: post.authorUid as string,
-        senderUid: uid,
-        senderUsername: username,
-        senderPhotoUrl: photoUrl,
-        type: "comment",
-        entityType: "post",
-        entityId: postId,
-        text: `@${username} commented: "${preview}${text.length > 60 ? "…" : ""}"`,
-      });
-    }
-  } catch { /* notifications are non-critical */ }
-
-  return commentRef.id;
+export async function addComment(uid: string, username: string, photoUrl: string, postId: string, text: string): Promise<string> {
+  return await platformRequest("comment", { postId, text });
 }
 
-export async function deleteComment(
-  postId: string,
-  commentId: string
-): Promise<void> {
-  if (!db) return;
-  await updateDoc(doc(db, "posts", postId, "comments", commentId), {
-    isDeleted: true,
-    updatedAt: serverTimestamp(),
-  });
-  await updateDoc(doc(db, "posts", postId), {
-    commentsCount: increment(-1),
-  });
+export async function deleteComment(postId: string, commentId: string): Promise<void> {
+  await platformRequest("deleteComment", { postId, commentId });
 }
 
-export async function likeComment(
-  postId: string,
-  commentId: string
-): Promise<void> {
-  if (!db) return;
-  await updateDoc(doc(db, "posts", postId, "comments", commentId), {
-    likesCount: increment(1),
-  });
+export async function likeComment(postId: string, commentId: string): Promise<void> {
+ await platformRequest("likeComment", { postId, commentId });
 }
 
 export function subscribeToComments(
@@ -221,8 +132,7 @@ export function subscribeToComments(
   // Filter isDeleted client-side.
   const q = query(
     collection(db, "posts", postId, "comments"),
-    orderBy("createdAt", "asc"),
-    limit(pageSize)
+    orderBy("createdAt", "asc")
   );
   return onSnapshot(q, (snap) => {
     const comments = snap.docs
@@ -234,33 +144,11 @@ export function subscribeToComments(
       } as Comment))
       .filter((c) => !c.isDeleted); // filter deleted client-side
     callback(comments);
-  });
+  }, () => callback([]));
 }
 
-export async function addReply(
-  uid: string,
-  username: string,
-  photoUrl: string,
-  postId: string,
-  commentId: string,
-  text: string
-): Promise<void> {
-  if (!db) return;
-  const repliesRef = collection(db, "posts", postId, "comments", commentId, "replies");
-  await addDoc(repliesRef, {
-    authorUid: uid,
-    authorUsername: username,
-    authorPhotoUrl: photoUrl,
-    text: text.trim(),
-    mentions: [],
-    likesCount: 0,
-    isDeleted: false,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-  await updateDoc(doc(db, "posts", postId, "comments", commentId), {
-    repliesCount: increment(1),
-  });
+export async function addReply(uid: string, username: string, photoUrl: string, postId: string, commentId: string, text: string): Promise<void> {
+  await platformRequest("reply", { postId, commentId, text });
 }
 
 // ─────────────────────────────────────────────
@@ -291,21 +179,8 @@ export async function reportPost(
 // Suggested users
 // ─────────────────────────────────────────────
 
-export async function getSuggestedUsers(
-  currentUid: string,
-  count = 5
-): Promise<Record<string, unknown>[]> {
-  if (!db) return [];
-  const q = query(
-    collection(db, "users"),
-    where("status", "==", "approved"),
-    limit(count + 1)
-  );
-  const snap = await getDocs(q);
-  return snap.docs
-    .filter((d) => d.id !== currentUid)
-    .slice(0, count)
-    .map((d) => ({ uid: d.id, ...d.data() }));
+export async function getSuggestedUsers(currentUid: string, count = 5): Promise<Record<string, unknown>[]> {
+ return platformRequest("suggestedUsers", { count });
 }
 
 // ─────────────────────────────────────────────
@@ -344,46 +219,26 @@ export async function markNotificationRead(notificationId: string): Promise<void
 }
 
 export async function markAllNotificationsRead(uid: string): Promise<void> {
-  if (!db) return;
-  const q = query(
-    collection(db, "notifications"),
-    where("recipientUid", "==", uid),
-    where("isRead", "==", false),
-    limit(100)
-  );
-  const snap = await getDocs(q);
-  const promises = snap.docs.map((d) =>
-    updateDoc(d.ref, { isRead: true, readAt: serverTimestamp() })
-  );
-  await Promise.all(promises);
+ if (!db) throw new Error("Firebase not configured");
+ for (;;) {
+  const snap = await getDocs(query(collection(db, "notifications"), where("recipientUid", "==", uid), where("isRead", "==", false), limit(100)));
+  if (snap.empty) return;
+  await Promise.all(snap.docs.map(d => updateDoc(d.ref, { isRead: true, readAt: serverTimestamp() })));
+ }
+
 }
 
 // ─────────────────────────────────────────────
 // Public feed (explore)
 // ─────────────────────────────────────────────
 
-export async function loadPublicPosts(
-  afterDoc?: unknown,
-  pageSize = 12
-): Promise<{ posts: Record<string, unknown>[]; cursor: unknown }> {
-  if (!db) return { posts: [], cursor: null };
-  const { startAfter } = await import("firebase/firestore");
+export async function loadPublicPosts(afterDoc?: unknown, pageSize = 12): Promise<{ posts: Record<string, unknown>[]; cursor: unknown }> {
+ return platformRequest("posts", { mode: "explore", cursor: typeof afterDoc === "string" ? afterDoc : undefined, pageSize });
+}
 
-  let q = query(
-    collection(db, "posts"),
-    where("visibility", "==", "public"),
-    where("isHidden", "==", false),
-    orderBy("createdAt", "desc"),
-    limit(pageSize + 1)
-  );
-  if (afterDoc) q = query(q, startAfter(afterDoc));
-
-  const snap = await getDocs(q);
-  const hasMore = snap.docs.length > pageSize;
-  const docs = snap.docs.slice(0, pageSize);
-
-  return {
-    posts: docs.map((d) => ({ id: d.id, ...d.data() })),
-    cursor: hasMore ? docs[docs.length - 1] : null,
-  };
+export function subscribeToReplies(postId: string, commentId: string, callback: (replies: Comment[]) => void): Unsubscribe {
+ if (!db) { callback([]); return () => {}; }
+ return onSnapshot(query(collection(db, "posts", postId, "comments", commentId, "replies"), orderBy("createdAt", "asc")), snap => {
+  callback(snap.docs.filter(d => !d.data().isDeleted).map(d => ({ ...d.data(), id: d.id, createdAt: d.data().createdAt?.toDate() ?? new Date(), updatedAt: d.data().updatedAt?.toDate() ?? new Date() } as Comment)));
+ }, () => callback([]));
 }

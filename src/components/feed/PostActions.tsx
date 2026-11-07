@@ -168,8 +168,8 @@ export function PostActions({
         className="flex items-center gap-1.5 p-1.5 rounded-lg hover:bg-bg-secondary transition-colors group"
         onClick={() => {
           if (navigator.share) {
-            navigator.share({ title: "Check this out on FRAMEFOLK", url: window.location.href }).catch(() => {});
-          }
+            navigator.share({ title: "Check this out on FRAMEFOLK", url: `${window.location.origin}/post/${postId}` }).catch(() => {});
+          } else { navigator.clipboard?.writeText(`${window.location.origin}/post/${postId}`).catch(() => {}); }
         }}
       >
         <Share2 className="h-5 w-5 text-text-secondary group-hover:text-text-primary transition-colors" />

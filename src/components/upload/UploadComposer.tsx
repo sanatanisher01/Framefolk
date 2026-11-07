@@ -10,6 +10,7 @@ import { uploadFiles } from "@/services/upload.service";
 import { createPost } from "@/services/media.service";
 import { createPostSchema, type CreatePostFormValues } from "@/lib/validations/post";
 import { FileDropzone, type FileWithPreview } from "./FileDropzone";
+import { AudienceEditor } from "./AudienceEditor";
 import { VisibilitySelector } from "./VisibilitySelector";
 import { UploadProgress, type FileUploadState } from "./UploadProgress";
 import { Button } from "@/components/ui/Button";
@@ -26,6 +27,7 @@ export function UploadComposer() {
   const { user } = useAuth();
 
   const [files, setFiles] = useState<FileWithPreview[]>([]);
+  const [customAudienceUids, setCustomAudienceUids] = useState<string[]>([]);
   const [visibility, setVisibility] = useState<PostVisibility>("public");
   const [step, setStep] = useState<ComposerStep>("compose");
   const [uploadStates, setUploadStates] = useState<FileUploadState[]>([]);
@@ -39,7 +41,7 @@ export function UploadComposer() {
   const captionValue = watch("caption", "");
 
   // Extract hashtag/mention highlights from caption
-  const highlightedCaption = captionValue
+  const highlightedCaption = captionValue.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
     .replace(/(#\w+)/g, '<span class="text-accent">$1</span>')
     .replace(/(@\w+)/g, '<span class="text-blue-400">$1</span>');
 
@@ -56,6 +58,7 @@ export function UploadComposer() {
       return;
     }
 
+    if (visibility === "custom" && !customAudienceUids.length) { setGlobalError("Choose at least one person for this post."); return; }
     setGlobalError(null);
     setStep("uploading");
 
@@ -101,6 +104,10 @@ export function UploadComposer() {
       });
     }
 
+    if (failed.length > 0) {
+      setGlobalError(`${failed.length} file(s) failed. Retry those files; successful files were saved in a separate post.`);
+    }
+
     if (results.length === 0) {
       setGlobalError("All uploads failed. Please check your connection and try again.");
       setStep("compose");
@@ -115,17 +122,21 @@ export function UploadComposer() {
         authorDisplayName: user.displayName,
         authorPhotoUrl: user.profilePhotoUrl,
         caption: data.caption ?? "",
-        visibility,
+        visibility, customAudienceUids,
         mediaResults: results,
         location: data.location,
       });
 
+      if (failed.length > 0) {
+        files.filter(f => !failed.some(item => item.file === f.file)).forEach(f => URL.revokeObjectURL(f.preview));
+        setFiles(files.filter(f => failed.some(item => item.file === f.file))); setStep("compose"); return;
+      }
       setStep("done");
       // Cleanup previews
       files.forEach((f) => URL.revokeObjectURL(f.preview));
       setTimeout(() => router.replace("/home"), 1500);
     } catch {
-      setGlobalError("Post created but failed to save. Please try again.");
+      setGlobalError("Could not save the post. Please try again.");
       setStep("compose");
     }
   }
@@ -176,12 +187,13 @@ export function UploadComposer() {
                     <p className="text-sm font-medium text-text-primary truncate">
                       {user?.displayName}
                     </p>
-                    <VisibilitySelector value={visibility} onChange={setVisibility} />
+                    <VisibilitySelector value={visibility} onChange={setVisibility} allowAudiences />
                   </div>
                 </div>
 
                 <Separator />
 
+                {["custom", "closeFriends"].includes(visibility) && <AudienceEditor closeFriends={visibility === "closeFriends"} value={customAudienceUids} onChange={setCustomAudienceUids} />}
                 {/* Caption */}
                 <div className="relative">
                   <Textarea
@@ -204,14 +216,9 @@ export function UploadComposer() {
 
                 <Separator />
 
-                {/* Location (stub — full implementation with map in Phase 7) */}
-                <button
-                  type="button"
-                  className="flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary transition-colors"
-                >
-                  <MapPin className="h-4 w-4 text-text-muted" />
-                  Add location
-                </button>
+                <label className="flex items-center gap-2 text-sm text-text-secondary">
+                  <MapPin className="h-4 w-4" /><input aria-label="Location" placeholder="Add location (optional)" maxLength={100} className="flex-1 bg-transparent focus:outline-none" {...register("location.name")} />
+                </label>
               </CardContent>
             </Card>
           )}

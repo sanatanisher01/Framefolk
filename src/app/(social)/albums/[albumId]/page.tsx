@@ -8,6 +8,9 @@ import {
   ArrowLeft, Users, Trash2, Grid3x3, UserPlus,
   UserCheck, UserX, Search, CheckCircle, AlertCircle,
 } from "lucide-react";
+import { getUserDoc } from "@/services/auth.service";
+import { platformRequest } from "@/services/platform.service";
+import { AlbumMediaPicker } from "@/components/upload/AlbumMediaPicker";
 import { useAuth } from "@/lib/auth/AuthContext";
 import {
   getAlbum, getAlbumMedia, deleteAlbum,
@@ -62,8 +65,8 @@ async function loadPendingInvitesForUser(uid: string): Promise<PendingInvite[]> 
     try {
       const albumSnap = await getDoc(doc(db, "albums", data.albumId as string));
       if (albumSnap.exists()) albumTitle = (albumSnap.data().title as string) ?? "Album";
-      const inviterSnap = await getDoc(doc(db, "users", data.invitedBy as string));
-      if (inviterSnap.exists()) inviterUsername = (inviterSnap.data().username as string) ?? "";
+      const inviter = await getUserDoc(data.invitedBy as string);
+      inviterUsername = (inviter?.username as string) ?? "";
     } catch { /* ignore */ }
     invites.push({
       id: d.id,
@@ -93,11 +96,11 @@ async function loadMembersWithProfiles(albumId: string): Promise<MemberWithProfi
     let displayName = "";
     let photoUrl = "";
     try {
-      const snap = await getDoc(doc(db, "users", m.uid));
-      if (snap.exists()) {
-        username = (snap.data().username as string) ?? "";
-        displayName = (snap.data().displayName as string) ?? "";
-        photoUrl = (snap.data().profilePhotoUrl as string) ?? "";
+      const profile = await getUserDoc(m.uid);
+      if (profile) {
+        username = (profile.username as string) ?? "";
+        displayName = (profile.displayName as string) ?? "";
+        photoUrl = (profile.profilePhotoUrl as string) ?? "";
       }
     } catch { /* ignore */ }
     return { ...m, username, displayName, photoUrl };
@@ -115,22 +118,8 @@ interface UserSearchResult {
 
 async function searchUsers(term: string, excludeUids: string[]): Promise<UserSearchResult[]> {
   if (!db || term.trim().length < 2) return [];
-  const q = query(
-    collection(db, "users"),
-    where("status", "==", "approved"),
-    where("username", ">=", term.toLowerCase()),
-    where("username", "<=", term.toLowerCase() + "\uf8ff"),
-    limit(8)
-  );
-  const snap = await getDocs(q);
-  return snap.docs
-    .filter((d) => !excludeUids.includes(d.id))
-    .map((d) => ({
-      uid: d.id,
-      username: (d.data().username as string) ?? "",
-      displayName: (d.data().displayName as string) ?? "",
-      photoUrl: (d.data().profilePhotoUrl as string) ?? "",
-    }));
+  const results = await platformRequest<{ uid: string; username: string; displayName: string; profilePhotoUrl: string }[]>("searchUsers", { search: term, count: 30 });
+  return results.filter(u => !excludeUids.includes(u.uid)).slice(0,8).map(u => ({ ...u, photoUrl: u.profilePhotoUrl ?? "" }));
 }
 
 // ─── Main page ────────────────────────────────────────────────────────────────
@@ -278,6 +267,7 @@ export default function AlbumDetailPage() {
               <Users className="h-3 w-3" /> Collab
             </Badge>
           )}
+          {(isOwner || members.some(m => m.uid === user?.uid && m.role === "contributor")) && <AlbumMediaPicker albumId={album.id} onAdded={load} />}
           {/* Invite button — owner of collaborative album only */}
           {isOwner && album.type === "collaborative" && (
             <Button
@@ -487,11 +477,7 @@ function MediaGrid({ media }: { media: Record<string, unknown>[] }) {
       {media.map((item) => {
         const publicId = (item.cloudinaryPublicId as string) ?? "";
         const isVideo = item.resourceType === "video";
-        const url = publicId
-          ? isVideo
-            ? buildVideoThumbnail(publicId, CLOUD_NAME)
-            : buildImageUrl(publicId, CLOUD_NAME, { width: 300 })
-          : null;
+        const url = item.thumbnailUrl as string ?? "";
         return (
           <div
             key={item.id as string}
@@ -499,6 +485,7 @@ function MediaGrid({ media }: { media: Record<string, unknown>[] }) {
           >
             {url && (
               <Image
+                unoptimized
                 src={url}
                 alt=""
                 fill

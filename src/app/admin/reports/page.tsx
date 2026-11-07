@@ -5,7 +5,7 @@ import { useState, useEffect } from "react";
 import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { useAuth } from "@/lib/auth/AuthContext";
-import { subscribeToReports, type AdminReportRow } from "@/services/admin.service";
+import { callHandleReport, subscribeToReports, type AdminReportRow } from "@/services/admin.service";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -48,12 +48,7 @@ export default function ReportsPage() {
     if (!db || !firebaseUser) return;
     setBusy(id);
     try {
-      await updateDoc(doc(db, "reports", id), {
-        status,
-        reviewedBy: firebaseUser.uid,
-        reviewedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      await callHandleReport(id, status);
       toast({
         title: status === "actioned" ? "Report actioned" : "Report dismissed",
         variant: status === "actioned" ? "success" : "default",
@@ -113,14 +108,14 @@ export default function ReportsPage() {
                 <div className="flex items-center gap-2">
                   {/* View content — link to profile for user reports, content page for post reports */}
                   {r.entityType === "user" ? (
-                    <Link href={`/@${r.entityId}`} target="_blank">
+                    <Link href={`/admin/users?uid=${r.entityId}`} target="_blank">
                       <Button variant="secondary" size="sm" className="gap-1.5">
                         <ExternalLink className="h-3.5 w-3.5" />
                         View profile
                       </Button>
                     </Link>
                   ) : (
-                    <Link href="/admin/content" target="_blank">
+                    <Link href={r.entityType === "post" ? `/post/${r.entityId}` : "/admin/content"} target="_blank">
                       <Button variant="secondary" size="sm" className="gap-1.5">
                         <ExternalLink className="h-3.5 w-3.5" />
                         View content

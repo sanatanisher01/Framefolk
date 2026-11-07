@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "prebuild": "node scripts/stamp-sw.mjs",
+    "typecheck": "tsc --noEmit --incremental false",
+    "test:integration": "node scripts/run-emulator-tests.cjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^7.0.2",

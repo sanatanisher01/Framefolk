@@ -1,3 +1,4 @@
+import { requirePermission } from "../lib/security";
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 
@@ -33,6 +34,8 @@ export const approveAccount = functions.https.onCall(
       );
     }
 
+    await requirePermission(context, "canApproveRegistrations", data.targetUid);
+
     const { targetUid, note } = data;
     if (!targetUid) {
       throw new functions.https.HttpsError("invalid-argument", "targetUid required.");
@@ -50,7 +53,8 @@ export const approveAccount = functions.https.onCall(
       });
 
       // ── 2. Set Firebase custom claim ────────────────────────────────────
-      await auth.setCustomUserClaims(targetUid, { role: "user" });
+      const existing = await auth.getUser(targetUid);
+      if (!existing.customClaims?.role) await auth.setCustomUserClaims(targetUid, { ...existing.customClaims, role: "user" });
 
       // ── 3. Notify the user ──────────────────────────────────────────────
       await db.collection("notifications").add({

@@ -27,3 +27,5 @@ export * from "./stories/expireStories";
 // Moderation — Phase 6
 export * from "./moderation/handleReport";
 export * from "./moderation/processDeletionRequest";
+
+export * from "./admin/restoreSuspensions";

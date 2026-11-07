@@ -3,14 +3,16 @@
  * Real-time one-to-one direct messaging via Firestore.
  */
 "use client";
+import { getUserDoc } from "./auth.service";
+import { platformRequest, poll } from "./platform.service";
 
 import {
   collection, doc, getDoc, setDoc,
   updateDoc, query, where, orderBy, limit, onSnapshot,
   serverTimestamp, increment, writeBatch,
-  type Unsubscribe,
+  limitToLast, type Unsubscribe,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase/client";
+import { db, auth } from "@/lib/firebase/client";
 import type { Conversation, Message } from "@/types";
 
 // ─────────────────────────────────────────────
@@ -22,66 +24,16 @@ function conversationId(uidA: string, uidB: string): string {
   return [uidA, uidB].sort().join("_");
 }
 
-export async function getOrCreateConversation(
-  uidA: string,
-  uidB: string
-): Promise<string> {
-  if (!db) throw new Error("Firebase not configured");
-
-  const convId = conversationId(uidA, uidB);
-  const convRef = doc(db, "conversations", convId);
-  const snap = await getDoc(convRef);
-
-  if (!snap.exists()) {
-    await setDoc(convRef, {
-      id: convId,
-      participants: [uidA, uidB],
-      lastMessage: null,
-      lastMessageAt: null,
-      unreadCounts: { [uidA]: 0, [uidB]: 0 },
-      createdAt: serverTimestamp(),
-    });
-  }
-
-  return convId;
+export async function getOrCreateConversation(uidA: string, uidB: string): Promise<string> {
+ return platformRequest<string>("conversation", { targetUid: uidB });
 }
 
 // ─────────────────────────────────────────────
 // Load conversations for a user
 // ─────────────────────────────────────────────
 
-export function subscribeToConversations(
-  uid: string,
-  callback: (convs: Conversation[]) => void
-): Unsubscribe {
-  if (!db) return () => {};
-  // Query without orderBy to avoid needing a composite index on null lastMessageAt
-  const q = query(
-    collection(db, "conversations"),
-    where("participants", "array-contains", uid),
-    limit(30)
-  );
-  return onSnapshot(q, (snap) => {
-    const convs = snap.docs.map((d) => {
-      const data = d.data();
-      return {
-        id: d.id,
-        participants: data.participants as [string, string],
-        lastMessage: data.lastMessage ?? null,
-        lastMessageAt: data.lastMessageAt?.toDate() ?? null,
-        unreadCounts: data.unreadCounts ?? {},
-        createdAt: data.createdAt?.toDate() ?? new Date(),
-      } as Conversation;
-    });
-    // Sort client-side: conversations with messages first, then by lastMessageAt desc
-    convs.sort((a, b) => {
-      if (!a.lastMessageAt && !b.lastMessageAt) return 0;
-      if (!a.lastMessageAt) return 1;
-      if (!b.lastMessageAt) return -1;
-      return b.lastMessageAt.getTime() - a.lastMessageAt.getTime();
-    });
-    callback(convs);
-  });
+export function subscribeToConversations(uid: string, callback: (convs: Conversation[]) => void): Unsubscribe {
+ return poll(() => platformRequest<Conversation[]>("conversations"), callback, () => callback([]));
 }
 
 // ─────────────────────────────────────────────
@@ -97,10 +49,20 @@ export function subscribeToMessages(
   // Simple orderBy only — filter isDeleted client-side to avoid composite index requirement
   const q = query(
     collection(db, "conversations", conversationId, "messages"),
-    orderBy("createdAt", "asc"),
-    limit(pageSize)
+    orderBy("createdAt", "asc"), limitToLast(pageSize)
   );
-  return onSnapshot(q, (snap) => {
+  let lastReadAt = 0;
+  let myReadAt = 0;
+  let latest: Message[] = [];
+  const publish = () => callback(latest.map(m => ({ ...m, isRead: m.isRead || m.createdAt.getTime() <= (m.senderUid === auth?.currentUser?.uid ? lastReadAt : myReadAt) })));
+  const stopConversation = onSnapshot(doc(db, "conversations", conversationId), snap => {
+    const d = snap.data();
+    const partner = (d?.participants as string[] | undefined)?.find(p => p !== auth?.currentUser?.uid);
+    myReadAt = d?.lastReadAt?.[auth?.currentUser?.uid ?? ""]?.toMillis() ?? 0;
+    lastReadAt = partner ? d?.lastReadAt?.[partner]?.toMillis() ?? 0 : 0;
+    publish();
+  }, () => callback([]));
+  const stopMessages = onSnapshot(q, (snap) => {
     const messages = snap.docs
       .map((d) => {
         const data = d.data();
@@ -119,69 +81,25 @@ export function subscribeToMessages(
         } as Message;
       })
       .filter((m) => !m.isDeleted); // filter client-side
-    callback(messages);
-  });
+    latest = messages; publish();
+  }, () => callback([]));
+  return () => { stopConversation(); stopMessages(); };
 }
 
 // ─────────────────────────────────────────────
 // Send a message
 // ─────────────────────────────────────────────
 
-export async function sendMessage(
-  conversationId: string,
-  senderUid: string,
-  recipientUid: string,
-  text: string
-): Promise<string> {
-  if (!db) throw new Error("Firebase not configured");
-
-  const batch = writeBatch(db);
-  const msgRef = doc(collection(db, "conversations", conversationId, "messages"));
-
-  batch.set(msgRef, {
-    id: msgRef.id,
-    senderUid,
-    type: "text",
-    text: text.trim(),
-    mediaId: null,
-    isRead: false,
-    readAt: null,
-    isDeleted: false,
-    deletedAt: null,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-
-  // Update conversation metadata
-  const convRef = doc(db, "conversations", conversationId);
-  batch.update(convRef, {
-    lastMessage: {
-      text: text.trim().slice(0, 100),
-      senderUid,
-      sentAt: serverTimestamp(),
-      type: "text",
-    },
-    lastMessageAt: serverTimestamp(),
-    [`unreadCounts.${recipientUid}`]: increment(1),
-  });
-
-  await batch.commit();
-  return msgRef.id;
+export async function sendMessage(conversationId: string, senderUid: string, recipientUid: string, text: string): Promise<string> {
+ return platformRequest<string>("sendMessage", { conversationId, text });
 }
 
 // ─────────────────────────────────────────────
 // Mark messages as read
 // ─────────────────────────────────────────────
 
-export async function markMessagesRead(
-  conversationId: string,
-  readerUid: string
-): Promise<void> {
-  if (!db) return;
-  const convRef = doc(db, "conversations", conversationId);
-  await updateDoc(convRef, {
-    [`unreadCounts.${readerUid}`]: 0,
-  });
+export async function markMessagesRead(conversationId: string, readerUid: string): Promise<void> {
+ await platformRequest("readMessages", { conversationId });
 }
 
 // ─────────────────────────────────────────────
@@ -204,21 +122,8 @@ export async function setTyping(
 // Unsend a message (soft delete)
 // ─────────────────────────────────────────────
 
-export async function unsendMessage(
-  conversationId: string,
-  messageId: string,
-  senderUid: string
-): Promise<void> {
-  if (!db) return;
-  const msgRef = doc(db, "conversations", conversationId, "messages", messageId);
-  const snap = await getDoc(msgRef);
-  if (!snap.exists() || snap.data().senderUid !== senderUid) return;
-
-  await updateDoc(msgRef, {
-    isDeleted: true,
-    deletedAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
+export async function unsendMessage(conversationId: string, messageId: string, senderUid: string): Promise<void> {
+ await platformRequest("unsend", { conversationId, messageId });
 }
 
 // ─────────────────────────────────────────────
@@ -238,10 +143,8 @@ export async function getConversationPartner(
   const partnerUid = participants.find((uid) => uid !== currentUid);
   if (!partnerUid) return null;
 
-  const userSnap = await getDoc(doc(db, "users", partnerUid));
-  if (!userSnap.exists()) return null;
-
-  const data = userSnap.data();
+  const data = await getUserDoc(partnerUid);
+  if (!data) return null;
   return {
     uid: partnerUid,
     username: (data.username as string) ?? "",
@@ -254,22 +157,6 @@ export async function getConversationPartner(
 // Get total unread message count across all conversations
 // ─────────────────────────────────────────────
 
-export function subscribeToUnreadCount(
-  uid: string,
-  callback: (count: number) => void
-): Unsubscribe {
-  if (!db) return () => {};
-  const q = query(
-    collection(db, "conversations"),
-    where("participants", "array-contains", uid),
-    limit(30)
-  );
-  return onSnapshot(q, (snap) => {
-    let total = 0;
-    snap.docs.forEach((d) => {
-      const counts = d.data().unreadCounts as Record<string, number> ?? {};
-      total += counts[uid] ?? 0;
-    });
-    callback(total);
-  });
+export function subscribeToUnreadCount(uid: string, callback: (count: number) => void): Unsubscribe {
+ return subscribeToConversations(uid, convs => callback(convs.reduce((sum,c) => sum + (c.unreadCounts?.[uid] ?? 0), 0)));
 }

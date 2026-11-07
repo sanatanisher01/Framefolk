@@ -1,3 +1,4 @@
+import { requirePermission } from "../lib/security";
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 
@@ -27,6 +28,8 @@ export const rejectAccount = functions.https.onCall(
         "Only admins can reject registrations."
       );
     }
+
+    await requirePermission(context, "canRejectRegistrations", data.targetUid);
 
     const { targetUid, reason } = data;
     if (!targetUid || !reason) {

@@ -35,20 +35,20 @@ const SETTINGS_GROUPS: SettingsGroup[] = [
       { icon: User, label: "Edit profile", description: "Name, bio, photo, links", href: "/settings/profile" },
       { icon: Lock, label: "Account & privacy", description: "Password, privacy, blocked users", href: "/settings/account" },
       { icon: Users, label: "Follow requests", description: "Manage who can follow you", href: "/settings/follow-requests" },
-      { icon: Bell, label: "Notifications", description: "Push, email and in-app alerts", href: "/settings/notifications" },
+      { icon: Bell, label: "Notifications", description: "Choose your in-app alerts", href: "/settings/notifications" },
     ],
   },
   {
     title: "Media & Storage",
     items: [
-      { icon: Cloud, label: "Storage settings", description: "Cloudinary account, usage", href: "/settings/storage", badge: "Phase 3" },
+      { icon: Cloud, label: "Storage settings", description: "Cloudinary account, usage", href: "/settings/storage" },
       { icon: Smartphone, label: "Install app", description: "Add FRAMEFOLK to your home screen", href: "/settings/install" },
     ],
   },
   {
     title: "Security",
     items: [
-      { icon: Shield, label: "Security", description: "Active sessions, connected apps", href: "/settings/security", badge: "Phase 8" },
+      { icon: Shield, label: "Security", description: "Password and connected sign-in methods", href: "/settings/account" },
     ],
   },
 ];
